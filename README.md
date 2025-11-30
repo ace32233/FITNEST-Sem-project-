@@ -1,17 +1,26 @@
-# fittness_app
+# Fitness_app
 
-A new Flutter project.
 
-## Getting Started
 
-This project is a starting point for a Flutter application.
+**FITNEST** is a Flutter-based mobile application designed to help users maintain a healthy lifestyle by tracking daily calories, water intake, and suggesting personalized workouts based on age. The app is lightweight, intuitive, and perfect for anyone looking to improve their fitness routine.
 
-A few resources to get you started if this is your first Flutter project:
+---
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+## Features
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+- **Calorie Tracker**  
+  Log your daily meals and track your calorie intake to stay within your nutritional goals.
+
+- **Water Intake Tracker**  
+  Keep track of how much water you drink daily to stay hydrated.
+
+- **Personalized Workout Suggestions**  
+  The app recommends workouts tailored to your age, helping you stay fit safely.
+
+- **User-Friendly Interface**  
+  Clean and intuitive design built with Flutter for smooth navigation.
+
+---
+
+# Updates on there way
 
