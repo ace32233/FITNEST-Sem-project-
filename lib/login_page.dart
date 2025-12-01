@@ -15,8 +15,6 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    // Calculate available height (Screen Height - Top/Bottom Safe Area)
-    // This keeps the layout "static" like a full screen page, but scrollable when keyboard opens.
     final padding = MediaQuery.of(context).padding;
     final availableHeight = size.height - padding.top - padding.bottom;
 
@@ -34,11 +32,8 @@ class _LoginPageState extends State<LoginPage> {
           /// MAIN CONTENT
           SafeArea(
             child: SingleChildScrollView(
-              // Clamping physics prevents weird bouncing on Android/iOS mixed feel
               physics: const ClampingScrollPhysics(),
               child: SizedBox(
-                // Forces the content to be the height of the screen.
-                // When keyboard opens, this height > visible area, so it scrolls.
                 height: availableHeight,
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: size.width * 0.09),
