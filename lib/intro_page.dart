@@ -10,7 +10,7 @@ class IntroPage extends StatelessWidget {
     final size = MediaQuery.of(context).size;
 
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: Color(0xFF0A2852),
       body: SafeArea(
         child: Stack(
           children: [
@@ -52,7 +52,7 @@ class IntroPage extends StatelessWidget {
                   );
                 },
                 child: Container(
-                  padding: EdgeInsets.symmetric(vertical: size.height * 0.018),
+                  padding: EdgeInsets.symmetric(vertical: size.height * 0.017),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(40),
@@ -64,6 +64,7 @@ class IntroPage extends StatelessWidget {
                         color: Colors.black,
                         fontSize: size.width * 0.045,
                         fontWeight: FontWeight.w500,
+                        letterSpacing: 3,
                       ),
                     ),
                   ),
