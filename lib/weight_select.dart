@@ -235,7 +235,7 @@ class _WeightSelectionScreenState extends State<WeightSelectionScreen> {
   }
 }
 
-/// 🔹 EXACT WAVE BACKGROUND PAINTER
+///  EXACT WAVE BACKGROUND PAINTER
 class WavePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
