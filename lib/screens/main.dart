@@ -1,4 +1,4 @@
-import 'package:fittness_app/intro_page.dart';
+import 'package:fittness_app/screens/intro_page.dart';
 import 'package:flutter/material.dart';
 void main() {
   runApp(const MyApp());

@@ -1,4 +1,4 @@
-import 'package:fittness_app/verification.dart';
+import 'package:fittness_app/screens/verification.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'login_page.dart';
