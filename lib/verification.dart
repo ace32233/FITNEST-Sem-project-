@@ -1,39 +1,28 @@
-import 'package:fittness_app/screens/login_page.dart';
+import 'package:fittness_app/login_page.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: const VerificationScreen(),
-    );
-  }
-}
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class VerificationScreen extends StatefulWidget {
-  const VerificationScreen({super.key});
+  final String email;
+
+  const VerificationScreen({super.key, required this.email});
 
   @override
   State<VerificationScreen> createState() => _VerificationScreenState();
 }
 
 class _VerificationScreenState extends State<VerificationScreen> {
-  final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
-  final List<TextEditingController> _controllers = 
+  final List<TextEditingController> _controllers =
       List.generate(6, (_) => TextEditingController());
+  final List<FocusNode> _focusNodes =
+      List.generate(6, (_) => FocusNode());
+
+  bool _loading = false;
 
   @override
   void initState() {
     super.initState();
-    // Auto-focus first box
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusNodes[0].requestFocus();
     });
@@ -41,264 +30,215 @@ class _VerificationScreenState extends State<VerificationScreen> {
 
   @override
   void dispose() {
-    for (var node in _focusNodes) {
-      node.dispose();
+    for (final c in _controllers) {
+      c.dispose();
     }
-    for (var controller in _controllers) {
-      controller.dispose();
+    for (final f in _focusNodes) {
+      f.dispose();
     }
     super.dispose();
   }
 
-  void _onCodeChanged(String value, int index) {
+  String get _otp => _controllers.map((c) => c.text).join();
+
+  void _onChanged(String value, int index) {
     if (value.isNotEmpty && index < 5) {
       _focusNodes[index + 1].requestFocus();
+    }
+
+    if (_otp.length == 6 && !_loading) {
+      _verifyOtp();
     }
   }
 
   void _onBackspace(int index) {
-    if (index > 0) {
-      _controllers[index - 1].clear();
+    if (index > 0 && _controllers[index].text.isEmpty) {
       _focusNodes[index - 1].requestFocus();
     }
   }
 
-  void _verifyCode() {
-    String code = _controllers.map((c) => c.text).join();
-    print('Verification code: $code');
-    // Add your verification logic here
+  Future<void> _verifyOtp() async {
+    if (_otp.length != 6 || _loading) return;
+
+    setState(() => _loading = true);
+
+    try {
+      await Supabase.instance.client.auth.verifyOTP(
+        email: widget.email,
+        token: _otp,
+        type: OtpType.signup,
+      );
+
+      if (!mounted) return;
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginPage()),
+      );
+    } on AuthException catch (e) {
+      _showError(e.message);
+      _clearOtp();
+    } catch (_) {
+      _showError("Invalid or expired OTP");
+      _clearOtp();
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
+  }
+
+  Future<void> _resendOtp() async {
+    try {
+      await Supabase.instance.client.auth.resend(
+        email: widget.email,
+        type: OtpType.signup,
+      );
+      _showMessage("OTP resent to ${widget.email}");
+    } catch (_) {
+      _showError("Failed to resend OTP");
+    }
+  }
+
+  void _clearOtp() {
+    for (final c in _controllers) {
+      c.clear();
+    }
+    _focusNodes[0].requestFocus();
+  }
+
+  void _showError(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg)),
+    );
+  }
+
+  void _showMessage(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg)),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    final width = size.width;
-    final height = size.height;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A2852),
       body: SafeArea(
-        child: SingleChildScrollView(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: height - MediaQuery.of(context).padding.top),
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: width * 0.06),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(height: height * 0.006),
-                  
-                  // Back button
-                  GestureDetector(
-                    onTap: () {
-                      Navigator.pop(context);
-                    },
-                    child: Text(
-                      '<',
-                      style: GoogleFonts.poppins(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 30,
-                      ),
-                    ),
-                  ),
-                  
-                  // Title
-                  Center(
-                    child: Text(
-                      'Verification',
-                      style: GoogleFonts.pacifico(
-                        color: Colors.white,
-                        fontSize: width * 0.115,
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: 1.8,
-                      ),
-                    ),
-                  ),
-                  
-                  SizedBox(height: height * 0.04),
-                  
-                  // Subtitle
-                  Center(
-                    child: Column(
-                      children: [
-                        Text(
-                          'Enter the code we\'ve sent by',
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontSize: width * 0.058,
-                            fontWeight: FontWeight.w400,
-                            height: 1.0,
-                        ),
-                        ),
-                        Text(
-                          'text to',
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontSize: width * 0.058,
-                            fontWeight: FontWeight.w400,
-                            height: 1.0,
-                          ),
-                        ),
-                        Text(
-                          'abc@gmail.com',
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontSize: width * 0.058,
-                            fontWeight: FontWeight.w400,
-                            height: 1.0,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  
-                  SizedBox(height: height * 0.05),
-                  
-                  // Code input boxes
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: width * 0.015),
-                    child: Row( 
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: List.generate(6, (index) {
-                        return Container( 
-                          margin: EdgeInsets.symmetric(horizontal: width * 0.008),
-                          child: _buildCodeBox(index, width), 
-                          ); 
-                        }
-                      ), 
-                    ),
-                  ),
-                  
-                  SizedBox(height: height * 0.05),
-                  
-                  // Resend code
-                  Center(
-                    child: Column(
-                      children: [
-                        Text(
-                          'Didn\'t receive code?',
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontSize: width * 0.04,
-                            fontWeight: FontWeight.w300,
-                          ),
-                        ),
-                        SizedBox(height: height * 0.008),
-                        InkWell(
-                          onTap: () {
-                            print('Resend code tapped');
-                            // Add your resend code logic here
-                          },
-                          child: Text(
-                            'Resend code',
-                            style: GoogleFonts.poppins(
-                              color: const Color.fromARGB(255, 255, 92, 22),
-                              fontSize: width * 0.04,
-                              fontWeight: FontWeight.w300,
-                              decoration: TextDecoration.underline,
-                              decorationColor: const Color.fromARGB(255, 255, 92, 22),
-                              decorationThickness: 1,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  
-                  SizedBox(height: height * 0.25),
-                  
-                  // Verify button
-                  Center(
-                    child: SizedBox(
-                      width: width * 0.36,
-                      height: height * 0.05,
-                      child: ElevatedButton(
-                        onPressed: () {
-                          // Optional: verify code first
-                          _verifyCode();
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: size.width * 0.06),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 10),
 
-                          Navigator.pushReplacement(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const LoginPage(),
-                            ),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: const Color(0xFF0A2852),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(35),
-                          ),
-                          elevation: 3,
-                        ),
-                        child: Text(
-                          'Verify',
-                          style: GoogleFonts.poppins(
-                            fontSize: width * 0.04,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1.5,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  SizedBox(height: height * 0.05),
-                ],
+              GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: const Text(
+                  '<',
+                  style: TextStyle(color: Colors.white, fontSize: 30),
+                ),
               ),
-            ),
+
+              Center(
+                child: Text(
+                  'Verification',
+                  style: GoogleFonts.pacifico(
+                    color: Colors.white,
+                    fontSize: size.width * 0.115,
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 30),
+
+              Center(
+                child: Column(
+                  children: [
+                    const Text(
+                      "Enter the 6-digit code sent to",
+                      style: TextStyle(color: Colors.white),
+                    ),
+                    Text(
+                      widget.email,
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 40),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: List.generate(
+                  6,
+                  (index) => _otpBox(index),
+                ),
+              ),
+
+              const SizedBox(height: 30),
+
+              Center(
+                child: InkWell(
+                  onTap: _loading ? null : _resendOtp,
+                  child: const Text(
+                    "Resend code",
+                    style: TextStyle(
+                      color: Color.fromARGB(255, 255, 92, 22),
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+              ),
+
+              const Spacer(),
+
+              Center(
+                child: ElevatedButton(
+                  onPressed: _loading ? null : _verifyOtp,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: const Color(0xFF0A2852),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(35),
+                    ),
+                  ),
+                  child: _loading
+                      ? const CircularProgressIndicator()
+                      : const Text("Verify"),
+                ),
+              ),
+
+              const SizedBox(height: 30),
+            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _buildCodeBox(int index, double width) {
-    final boxSize = width * 0.125;
-    
-    return Container(
-      width: boxSize,
-      height: boxSize,
-      decoration: BoxDecoration(
-        color: const Color(0xFF000000),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: Colors.grey.withOpacity(0.3),
-          width: 1,
-        ),
-      ),
+  Widget _otpBox(int index) {
+    return SizedBox(
+      width: 45,
+      height: 55,
       child: TextField(
         controller: _controllers[index],
         focusNode: _focusNodes[index],
+        enabled: !_loading,
         textAlign: TextAlign.center,
-        keyboardType: TextInputType.number,
         maxLength: 1,
-        style: GoogleFonts.poppins(
-          color: Colors.white,
-          fontSize: width * 0.04,
-          fontWeight: FontWeight.w400,
-        ),
+        keyboardType: TextInputType.number,
+        style: const TextStyle(color: Colors.white, fontSize: 20),
         decoration: const InputDecoration(
           counterText: '',
-          border: InputBorder.none,
-          contentPadding: EdgeInsets.zero,
+          filled: true,
+          fillColor: Colors.black,
+          border: OutlineInputBorder(borderSide: BorderSide.none),
         ),
-        onChanged: (value) => _onCodeChanged(value, index),
-        onTap: () {
-          _controllers[index].selection = TextSelection.fromPosition(
-            TextPosition(offset: _controllers[index].text.length),
-          );
-        },
-        onEditingComplete: () {
-          if (index < 5) {
-            _focusNodes[index + 1].requestFocus();
-          }
-        },
+        onChanged: (value) => _onChanged(value, index),
+        onSubmitted: (_) => _onBackspace(index),
       ),
     );
   }
