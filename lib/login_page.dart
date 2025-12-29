@@ -1,6 +1,8 @@
 import 'package:fittness_app/gender_page.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'signup_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -12,8 +14,33 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   bool _rememberMe = false;
+  bool _isLoading = false;
+
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+
+  final supabase = Supabase.instance.client;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkSession();
+  }
+
+  //Auto-login
+  Future<void> _checkSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    final rememberMe = prefs.getBool('remember_me') ?? false;
+
+    final session = supabase.auth.currentSession;
+
+    if (session != null && rememberMe && mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const GenderScreen()),
+      );
+    }
+  }
 
   @override
   void dispose() {
@@ -22,10 +49,45 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
-  void _navigateToGender() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const GenderScreen()),
+  //Login using Supabase
+  Future<void> _login() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+
+    if (email.isEmpty || password.isEmpty) {
+      _showError('Please enter email and password');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final response = await supabase.auth.signInWithPassword(
+        email: email,
+        password: password,
+      );
+
+      if (response.user != null && mounted) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('remember_me', _rememberMe);
+
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const GenderScreen()),
+        );
+      }
+    } on AuthException catch (e) {
+      _showError(e.message);
+    } catch (_) {
+      _showError('Login failed. Try again.');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(backgroundColor: Colors.red, content: Text(message)),
     );
   }
 
@@ -37,33 +99,19 @@ class _LoginPageState extends State<LoginPage> {
       backgroundColor: const Color(0xFF0A2852),
       body: SafeArea(
         child: SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
           padding: EdgeInsets.symmetric(horizontal: size.width * 0.05),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SizedBox(height: size.height * 0.0005),
-              
-              // Back Button
-              GestureDetector(
-                onTap: () => Navigator.pop(context),
-                child: Text('<',
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontSize: size.width * 0.08,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
+              const SizedBox(height: 10),
 
-              SizedBox(height: size.height * 0.0001),
-
-              // Title
+              //Title
               Center(
-                child: Text("Login",
+                child: Text(
+                  "Login",
                   style: GoogleFonts.pacifico(
                     fontSize: size.width * 0.13,
-                    letterSpacing: 3.0,
+                    letterSpacing: 3,
                     color: Colors.white,
                   ),
                 ),
@@ -71,102 +119,89 @@ class _LoginPageState extends State<LoginPage> {
 
               SizedBox(height: size.height * 0.04),
 
-              // Email Field
               _buildField("Email", _emailController, "Enter Email"),
               SizedBox(height: size.height * 0.025),
 
-              // Password Field
-              _buildField("Password", _passwordController, "Enter Password", obscure: true),
-              SizedBox(height: size.height * 0.015),
+              _buildField(
+                "Password",
+                _passwordController,
+                "Enter Password",
+                obscure: true,
+              ),
 
-              // Remember Me & Forgot Password
+              SizedBox(height: size.height * 0.02),
+
+              //Remember Me
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: Checkbox(
-                          value: _rememberMe,
-                          activeColor: const Color(0xFF6C63FF),
-                          side: const BorderSide(color: Colors.white70, width: 1.5),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                          onChanged: (v) => setState(() => _rememberMe = v ?? false),
-                        ),
+                  Checkbox(
+                    value: _rememberMe,
+                    activeColor: const Color(0xFF6C63FF),
+                    onChanged: (v) => setState(() => _rememberMe = v ?? false),
+                  ),
+                  Text(
+                    "Remember Me",
+                    style: _textStyle(14, Colors.white),
+                  ),
+                ],
+              ),
+
+              SizedBox(height: size.height * 0.03),
+
+              //Login Button
+              Center(
+                child: SizedBox(
+                  width: size.width * 0.6,
+                  height: size.height * 0.055,
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : _login,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
                       ),
-                      const SizedBox(width: 2),
-                      Text("Remember Me", style: _textStyle(14, Colors.white, FontWeight.w300)),
-                    ],
+                    ),
+                    child: _isLoading
+                        ? const CircularProgressIndicator(color: Colors.black)
+                        : Text(
+                            "Log In",
+                            style: _textStyle(
+                              20,
+                              const Color(0xFF0D2847),
+                              FontWeight.w600,
+                            ),
+                          ),
                   ),
-                  GestureDetector(
-                    onTap: () {},
-                    child: Text("Forgot Password?", style: _textStyle(14, Colors.white70, FontWeight.w300)),
-                  ),
-                ],
-              ),
-
-              SizedBox(height: size.height * 0.04),
-
-              // Login Button
-              _buildButton("Log In", _navigateToGender, size.height, size.width,
-                bgColor: Colors.white, textColor: const Color(0xFF0D2847), rounded: true),
-
-              SizedBox(height: size.height * 0.03),
-
-              // Divider
-              Row(
-                children: [
-                  const Expanded(child: Divider(color: Colors.white54, thickness: 2)),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 17),
-                    child: Text("OR", style: _textStyle(14, Colors.white70)),
-                  ),
-                  const Expanded(child: Divider(color: Colors.white54, thickness: 2)),
-                ],
-              ),
-
-              SizedBox(height: size.height * 0.03),
-
-              // Social Buttons
-              _buildSocialButton(
-                child: Image.network(
-                  'https://www.google.com/favicon.ico',
-                  width: 25,
-                  height: 25,
-                  errorBuilder: (context, error, stackTrace) => 
-                    const Icon(Icons.g_mobiledata, color: Colors.white, size: 25),
                 ),
-                text: "Continue with Google",
-                size: size,
               ),
-              SizedBox(height: size.height * 0.02),
-              _buildIconButton(Icons.apple, "Continue with Apple", size),
-              SizedBox(height: size.height * 0.02),
-              _buildIconButton(Icons.person_outline, "Continue as Guest", size, onTap: _navigateToGender),
+
               SizedBox(height: size.height * 0.04),
 
-              // Sign Up Link
+              //Sign Up
               Center(
                 child: GestureDetector(
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SignUpPage())),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const SignUpPage()),
+                  ),
                   child: Text.rich(
                     TextSpan(
                       text: "Don't have an account? ",
-                      style: _textStyle(16, Colors.white),
+                      style: _textStyle(16),
                       children: [
                         TextSpan(
                           text: "Sign Up",
-                          style: _textStyle(16, const Color.fromARGB(255, 255, 92, 22), FontWeight.w400),
+                          style: _textStyle(
+                            16,
+                            Colors.orange,
+                            FontWeight.w500,
+                          ),
                         ),
                       ],
                     ),
                   ),
                 ),
               ),
-
-              SizedBox(height: size.height * 0.03),
             ],
           ),
         ),
@@ -174,7 +209,12 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  Widget _buildField(String label, TextEditingController controller, String hint, {bool obscure = false}) {
+  Widget _buildField(
+    String label,
+    TextEditingController controller,
+    String hint, {
+    bool obscure = false,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -189,12 +229,9 @@ class _LoginPageState extends State<LoginPage> {
             fillColor: const Color(0xFF3C3C3C),
             hintText: hint,
             hintStyle: _textStyle(15, Colors.white38),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-            focusedBorder: OutlineInputBorder(
+            border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFF6C63FF), width: 2),
+              borderSide: BorderSide.none,
             ),
           ),
         ),
@@ -202,80 +239,15 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  Widget _buildButton(String text, VoidCallback onTap, double height, double width,
-      {Color bgColor = const Color(0xFF1E3A5F), Color textColor = Colors.white, bool rounded = false}) {
-    return Center(
-      child: SizedBox(
-      width: width * 0.6,
-      height: height * 0.052,
-      child: ElevatedButton(
-        onPressed: onTap,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: bgColor,
-          foregroundColor: textColor,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(rounded ? height * 0.035 : 12),
-          ),
-        ),
-        child: Text(text, style: _textStyle(22, textColor, FontWeight.w600, 2.5)),
-      ),
-      ),
-    );
-  }
-
-    Widget _buildIconButton(IconData icon, String text, Size size, {VoidCallback? onTap}) {
-    return SizedBox(
-      width: double.infinity,
-      height: size.height * 0.056,
-      child: Material(
-        color: const Color(0xFF2F2F2F),
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          onTap: onTap ?? () {},
-          borderRadius: BorderRadius.circular(12),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, color: Colors.white, size: size.width * 0.08),
-              const SizedBox(width: 12),
-              Text(text, style: _textStyle(15)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSocialButton({required Widget child, required String text, required Size size, VoidCallback? onTap}) {
-    return SizedBox(
-      width: double.infinity,
-      height: size.height * 0.056,
-      child: Material(
-        color: const Color(0xFF2F2F2F),
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          onTap: onTap ?? () {},
-          borderRadius: BorderRadius.circular(12),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              child,
-              const SizedBox(width: 12),
-              Text(text, style: _textStyle(15)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  TextStyle _textStyle(double size, [Color? color, FontWeight? weight, double? letterSpacing]) {
+  TextStyle _textStyle(
+    double size, [
+    Color? color,
+    FontWeight? weight,
+  ]) {
     return GoogleFonts.poppins(
-      color: color ?? Colors.white,
       fontSize: size,
+      color: color ?? Colors.white,
       fontWeight: weight,
-      letterSpacing: letterSpacing,
     );
   }
 }
