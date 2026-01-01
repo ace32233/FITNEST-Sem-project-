@@ -1,9 +1,10 @@
-import 'package:fittness_app/gender_page.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'signup_page.dart';
+import 'gender_page.dart';
+import 'home_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -27,18 +28,15 @@ class _LoginPageState extends State<LoginPage> {
     _checkSession();
   }
 
-  //Auto-login
+  // Auto-login if session exists
   Future<void> _checkSession() async {
     final prefs = await SharedPreferences.getInstance();
     final rememberMe = prefs.getBool('remember_me') ?? false;
-
     final session = supabase.auth.currentSession;
 
     if (session != null && rememberMe && mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const GenderScreen()),
-      );
+      // Check if user has completed onboarding
+      await _navigateBasedOnOnboarding();
     }
   }
 
@@ -49,7 +47,7 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
-  //Login using Supabase
+  // Login using Supabase
   Future<void> _login() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
@@ -71,17 +69,56 @@ class _LoginPageState extends State<LoginPage> {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('remember_me', _rememberMe);
 
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const GenderScreen()),
-        );
+        // Navigate based on onboarding status
+        await _navigateBasedOnOnboarding();
       }
     } on AuthException catch (e) {
       _showError(e.message);
     } catch (_) {
       _showError('Login failed. Try again.');
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  // Check if user completed onboarding and navigate accordingly
+  Future<void> _navigateBasedOnOnboarding() async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) return;
+
+      final response = await supabase
+          .from('user_fitness')
+          .select()
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (!mounted) return;
+
+      if (response == null) {
+        // First time user - go to onboarding
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const GenderScreen()),
+        );
+      } else {
+        // Returning user - go to home
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const HomePage()),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error checking onboarding: $e');
+      // Default to onboarding if error
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const GenderScreen()),
+        );
+      }
     }
   }
 
@@ -105,7 +142,7 @@ class _LoginPageState extends State<LoginPage> {
             children: [
               const SizedBox(height: 10),
 
-              //Title
+              // Title
               Center(
                 child: Text(
                   "Login",
@@ -131,7 +168,7 @@ class _LoginPageState extends State<LoginPage> {
 
               SizedBox(height: size.height * 0.02),
 
-              //Remember Me
+              // Remember Me
               Row(
                 children: [
                   Checkbox(
@@ -148,7 +185,7 @@ class _LoginPageState extends State<LoginPage> {
 
               SizedBox(height: size.height * 0.03),
 
-              //Login Button
+              // Login Button
               Center(
                 child: SizedBox(
                   width: size.width * 0.6,
@@ -157,12 +194,21 @@ class _LoginPageState extends State<LoginPage> {
                     onPressed: _isLoading ? null : _login,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
+                      disabledBackgroundColor: Colors.white70,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(30),
                       ),
                     ),
                     child: _isLoading
-                        ? const CircularProgressIndicator(color: Colors.black)
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(Colors.black),
+                            ),
+                          )
                         : Text(
                             "Log In",
                             style: _textStyle(
@@ -177,7 +223,7 @@ class _LoginPageState extends State<LoginPage> {
 
               SizedBox(height: size.height * 0.04),
 
-              //Sign Up
+              // Sign Up
               Center(
                 child: GestureDetector(
                   onTap: () => Navigator.push(

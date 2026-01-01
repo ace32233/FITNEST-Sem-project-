@@ -1,8 +1,8 @@
-import 'package:fittness_app/verification.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'login_page.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'login_page.dart';
+import 'verification.dart';
 
 class SignUpPage extends StatefulWidget {
   const SignUpPage({super.key});
@@ -36,10 +36,15 @@ class _SignUpPageState extends State<SignUpPage> {
       return;
     }
 
+    if (password.length < 6) {
+      _showError("Password must be at least 6 characters");
+      return;
+    }
+
     setState(() => _loading = true);
 
     try {
-      await Supabase.instance.client.auth.signUp(
+      final response = await Supabase.instance.client.auth.signUp(
         email: email,
         password: password,
         data: {
@@ -49,16 +54,32 @@ class _SignUpPageState extends State<SignUpPage> {
 
       if (!mounted) return;
 
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => VerificationScreen(email: email),
-        ),
-      );
+      if (response.user != null) {
+        // Check if email confirmation is required
+        if (response.session != null) {
+          // User is automatically logged in (email confirmation disabled)
+          _showSuccess("Account created successfully!");
+          await Future.delayed(const Duration(seconds: 1));
+          if (!mounted) return;
+          
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const LoginPage()),
+          );
+        } else {
+          // Email confirmation required
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => VerificationScreen(email: email),
+            ),
+          );
+        }
+      }
     } on AuthException catch (e) {
       _showError(e.message);
     } catch (e) {
-      _showError("Something went wrong");
+      _showError("Something went wrong: $e");
     } finally {
       if (mounted) {
         setState(() => _loading = false);
@@ -68,7 +89,19 @@ class _SignUpPageState extends State<SignUpPage> {
 
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+
+  void _showSuccess(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green,
+      ),
     );
   }
 
@@ -124,7 +157,7 @@ class _SignUpPageState extends State<SignUpPage> {
               _buildField(
                 "Password",
                 _passwordController,
-                "Enter Password",
+                "Enter Password (min 6 characters)",
                 obscure: true,
               ),
 
@@ -139,6 +172,7 @@ class _SignUpPageState extends State<SignUpPage> {
                     onPressed: _loading ? null : _signUp,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
+                      disabledBackgroundColor: Colors.white70,
                       foregroundColor: const Color(0xFF0D2847),
                       shape: RoundedRectangleBorder(
                         borderRadius:
@@ -151,6 +185,8 @@ class _SignUpPageState extends State<SignUpPage> {
                             height: 22,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(Color(0xFF0D2847)),
                             ),
                           )
                         : Text(
@@ -172,7 +208,7 @@ class _SignUpPageState extends State<SignUpPage> {
               Center(
                 child: GestureDetector(
                   onTap: () {
-                    Navigator.push(
+                    Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(builder: (_) => const LoginPage()),
                     );
