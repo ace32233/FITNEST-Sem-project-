@@ -2,26 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'height_select.dart';
 
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        textTheme: GoogleFonts.poppinsTextTheme(),
-      ),
-      home: const WeightSelectionScreen(),
-    );
-  }
-}
-
 class WeightSelectionScreen extends StatefulWidget {
-  const WeightSelectionScreen({super.key});
+  final String selectedGender;
+  final int selectedAge;
+
+  const WeightSelectionScreen({
+    super.key,
+    required this.selectedGender,
+    required this.selectedAge,
+  });
+
   @override
   State<WeightSelectionScreen> createState() => _WeightSelectionScreenState();
 }
@@ -31,6 +21,8 @@ class _WeightSelectionScreenState extends State<WeightSelectionScreen> {
       FixedExtentScrollController(initialItem: 70);
 
   int _selectedWeight = 71;
+
+  static const _bgColor = Color(0xFF0A2852);
 
   @override
   void initState() {
@@ -51,23 +43,20 @@ class _WeightSelectionScreenState extends State<WeightSelectionScreen> {
     final height = size.height;
 
     return Scaffold(
-      backgroundColor: Color(0xFF0A2852),
+      backgroundColor: _bgColor,
       body: Stack(
         children: [
-          // 🔹 BACKGROUND WITH WAVE
-          Positioned.fill(
+          const Positioned.fill(
             child: CustomPaint(
               painter: WavePainter(),
             ),
           ),
 
-          //  FOREGROUND CONTENT
           SafeArea(
             child: Column(
               children: [
                 SizedBox(height: height * 0.005),
 
-                // Back Arrow
                 Padding(
                   padding: EdgeInsets.only(left: width * 0.034),
                   child: Align(
@@ -82,7 +71,6 @@ class _WeightSelectionScreenState extends State<WeightSelectionScreen> {
 
                 SizedBox(height: height * 0.008),
 
-                // Title
                 Text(
                   'What is your weight?',
                   style: GoogleFonts.poppins(
@@ -115,9 +103,9 @@ class _WeightSelectionScreenState extends State<WeightSelectionScreen> {
                     letterSpacing: 1.3,
                   ),
                 ),
+
                 SizedBox(height: height * 0.092),
 
-                // WHEEL AREA
                 SizedBox(
                   height: height * 0.348,
                   child: Stack(
@@ -164,7 +152,6 @@ class _WeightSelectionScreenState extends State<WeightSelectionScreen> {
                         ),
                       ),
 
-                      // top line
                       Positioned(
                         top: height * 0.135,
                         child: Container(
@@ -177,7 +164,6 @@ class _WeightSelectionScreenState extends State<WeightSelectionScreen> {
                         ),
                       ),
 
-                      // bottom line
                       Positioned(
                         top: height * 0.210,
                         child: Container(
@@ -195,7 +181,6 @@ class _WeightSelectionScreenState extends State<WeightSelectionScreen> {
 
                 SizedBox(height: height * 0.16),
 
-                // BUTTON
                 SizedBox(
                   width: width * 0.388,
                   height: height * 0.050,
@@ -204,7 +189,11 @@ class _WeightSelectionScreenState extends State<WeightSelectionScreen> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => HeightSelectionScreen(),
+                          builder: (context) => HeightSelectionScreen(
+                            selectedGender: widget.selectedGender,
+                            selectedAge: widget.selectedAge,
+                            selectedWeight: _selectedWeight,
+                          ),
                         ),
                       );
                     },
@@ -235,8 +224,9 @@ class _WeightSelectionScreenState extends State<WeightSelectionScreen> {
   }
 }
 
-///  EXACT WAVE BACKGROUND PAINTER
 class WavePainter extends CustomPainter {
+  const WavePainter();
+
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
@@ -246,37 +236,25 @@ class WavePainter extends CustomPainter {
 
     final path = Path();
 
-    // Starting point (left side)
     final startY = size.height * 0.59;
     path.moveTo(0, startY);
 
-    // First curve - smooth transition to the valley
-    final cp1X = size.width * 0.10;
-    final cp1Y = size.height * 0.70;
-    final cp2X = size.width * 0.25;
-    final cp2Y = size.height * 0.71;
-    final endX1 = size.width * 0.35;
-    final endY1 = size.height * 0.695;
+    path.cubicTo(
+      size.width * 0.10, size.height * 0.70,
+      size.width * 0.25, size.height * 0.71,
+      size.width * 0.35, size.height * 0.695,
+    );
 
-    path.cubicTo(cp1X, cp1Y, cp2X, cp2Y, endX1, endY1);
+    path.cubicTo(
+      size.width * 0.45, size.height * 0.68,
+      size.width * 0.75, size.height * 0.60,
+      size.width * 0.89, size.height * 0.664,
+    );
 
-    // Second curve - gentle rise to the peak
-    final cp3X = size.width * 0.45;
-    final cp3Y = size.height * 0.68;
-    final cp4X = size.width * 0.75;
-    final cp4Y = size.height * 0.60;
-    final endX2 = size.width * 0.89;
-    final endY2 = size.height * 0.664;
-
-    path.cubicTo(cp3X, cp3Y, cp4X, cp4Y, endX2, endY2);
-
-    // Final segment to right edge
-    final cp5X = size.width * 0.90;
-    final cp5Y = size.height * 0.6662;
-    final endX3 = size.width;
-    final endY3 = size.height * 0.715;
-
-    path.quadraticBezierTo(cp5X, cp5Y, endX3, endY3);
+    path.quadraticBezierTo(
+      size.width * 0.90, size.height * 0.6662,
+      size.width, size.height * 0.715,
+    );
 
     canvas.drawPath(path, paint);
   }
