@@ -2,26 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'weight_select.dart';
 
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        textTheme: GoogleFonts.poppinsTextTheme(),
-      ),
-      home: const AgeSelectionScreen(),
-    );
-  }
-}
-
 class AgeSelectionScreen extends StatefulWidget {
-  const AgeSelectionScreen({super.key});
+  final String selectedGender;
+
+  const AgeSelectionScreen({
+    super.key,
+    required this.selectedGender,
+  });
+
   @override
   State<AgeSelectionScreen> createState() => _AgeSelectionScreenState();
 }
@@ -31,6 +19,8 @@ class _AgeSelectionScreenState extends State<AgeSelectionScreen> {
       FixedExtentScrollController(initialItem: 20);
 
   int _selectedAge = 21;
+
+  static const _bgColor = Color(0xFF0A2852);
 
   @override
   void initState() {
@@ -51,10 +41,10 @@ class _AgeSelectionScreenState extends State<AgeSelectionScreen> {
     final height = size.height;
 
     return Scaffold(
-      backgroundColor: Color(0xFF0A2852),
+      backgroundColor: _bgColor,
       body: Stack(
         children: [
-          Positioned.fill(
+          const Positioned.fill(
             child: CustomPaint(
               painter: WavePainter(),
             ),
@@ -175,7 +165,10 @@ class _AgeSelectionScreenState extends State<AgeSelectionScreen> {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => WeightSelectionScreen(),
+                            builder: (context) => WeightSelectionScreen(
+                              selectedGender: widget.selectedGender,
+                              selectedAge: _selectedAge,
+                            ),
                           ),
                         );
                       },
@@ -208,6 +201,8 @@ class _AgeSelectionScreenState extends State<AgeSelectionScreen> {
 }
 
 class WavePainter extends CustomPainter {
+  const WavePainter();
+
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
@@ -220,30 +215,22 @@ class WavePainter extends CustomPainter {
     final startY = size.height * 0.59;
     path.moveTo(0, startY);
     
-    final cp1X = size.width * 0.10;
-    final cp1Y = size.height * 0.70;
-    final cp2X = size.width * 0.25;
-    final cp2Y = size.height * 0.71;
-    final endX1 = size.width * 0.35;
-    final endY1 = size.height * 0.695;
+    path.cubicTo(
+      size.width * 0.10, size.height * 0.70,
+      size.width * 0.25, size.height * 0.71,
+      size.width * 0.35, size.height * 0.695,
+    );
     
-    path.cubicTo(cp1X, cp1Y, cp2X, cp2Y, endX1, endY1);
+    path.cubicTo(
+      size.width * 0.45, size.height * 0.68,
+      size.width * 0.75, size.height * 0.60,
+      size.width * 0.89, size.height * 0.664,
+    );
     
-    final cp3X = size.width * 0.45;
-    final cp3Y = size.height * 0.68;
-    final cp4X = size.width * 0.75;
-    final cp4Y = size.height * 0.60;
-    final endX2 = size.width * 0.89;
-    final endY2 = size.height * 0.664;
-    
-    path.cubicTo(cp3X, cp3Y, cp4X, cp4Y, endX2, endY2);
-    
-    final cp5X = size.width * 0.90;
-    final cp5Y = size.height * 0.6662;
-    final endX3 = size.width;
-    final endY3 = size.height * 0.715;
-    
-    path.quadraticBezierTo(cp5X, cp5Y, endX3, endY3);
+    path.quadraticBezierTo(
+      size.width * 0.90, size.height * 0.6662,
+      size.width, size.height * 0.715,
+    );
 
     canvas.drawPath(path, paint);
   }
