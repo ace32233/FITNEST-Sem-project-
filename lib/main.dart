@@ -1,5 +1,3 @@
-//     url: 'https://mjijxsojtbshsauguwjf.supabase.co',
-//     anonKey: 'sb_publishable_Ed9aAKGTLev20EWZmbmP7w_2mrQUCAM',
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -13,7 +11,7 @@ void main() async {
   // Initialize Supabase
   await Supabase.initialize(
     url: 'https://mjijxsojtbshsauguwjf.supabase.co',
-anonKey: 'sb_publishable_Ed9aAKGTLev20EWZmbmP7w_2mrQUCAM',
+    anonKey: 'sb_publishable_Ed9aAKGTLev20EWZmbmP7w_2mrQUCAM',
   );
 
   runApp(const MyApp());
@@ -68,9 +66,14 @@ class _AuthGateState extends State<AuthGate> {
         return;
       }
 
-      // User is logged in - check if they completed onboarding
+      // User is logged in
       final user = session.user;
-      final response = await supabase
+
+      // Ensure profile exists
+      await _ensureProfileExists(user);
+
+      // Check if they completed onboarding
+      final fitnessResponse = await supabase
           .from('user_fitness')
           .select()
           .eq('id', user.id)
@@ -78,7 +81,7 @@ class _AuthGateState extends State<AuthGate> {
 
       if (!mounted) return;
 
-      if (response == null) {
+      if (fitnessResponse == null) {
         // No fitness data - first time user, show onboarding
         setState(() {
           _destination = const GenderScreen();
@@ -100,6 +103,33 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
+  // Ensure profile exists for the user
+  Future<void> _ensureProfileExists(User user) async {
+    try {
+      final supabase = Supabase.instance.client;
+      
+      // Check if profile exists
+      final profileResponse = await supabase
+          .from('profiles')
+          .select()
+          .eq('id', user.id)
+          .maybeSingle();
+
+      // If no profile exists, create one
+      if (profileResponse == null) {
+        await supabase.from('profiles').insert({
+          'id': user.id,
+          'full_name': user.userMetadata?['full_name'] ?? '',
+          'email': user.email ?? '',
+          'created_at': DateTime.now().toIso8601String(),
+        });
+        debugPrint('Profile created for user: ${user.id}');
+      }
+    } catch (e) {
+      debugPrint('Error ensuring profile exists: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -114,5 +144,3 @@ class _AuthGateState extends State<AuthGate> {
     return _destination;
   }
 }
-
-
