@@ -44,7 +44,10 @@ class _SignUpPageState extends State<SignUpPage> {
     setState(() => _loading = true);
 
     try {
-      final response = await Supabase.instance.client.auth.signUp(
+      final supabase = Supabase.instance.client;
+      
+      // Sign up the user
+      final response = await supabase.auth.signUp(
         email: email,
         password: password,
         data: {
@@ -55,6 +58,7 @@ class _SignUpPageState extends State<SignUpPage> {
       if (!mounted) return;
 
       if (response.user != null) {
+        // The database trigger will automatically create the profile
         // Check if email confirmation is required
         if (response.session != null) {
           // User is automatically logged in (email confirmation disabled)

@@ -69,17 +69,45 @@ class _LoginPageState extends State<LoginPage> {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('remember_me', _rememberMe);
 
+        // Ensure profile exists (in case it wasn't created by trigger)
+        await _ensureProfileExists(response.user!);
+
         // Navigate based on onboarding status
         await _navigateBasedOnOnboarding();
       }
     } on AuthException catch (e) {
       _showError(e.message);
-    } catch (_) {
-      _showError('Login failed. Try again.');
+    } catch (e) {
+      _showError('Login failed. Try again. Error: $e');
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
       }
+    }
+  }
+
+  // Ensure profile exists for the user
+  Future<void> _ensureProfileExists(User user) async {
+    try {
+      // Check if profile exists
+      final profileResponse = await supabase
+          .from('profiles')
+          .select()
+          .eq('id', user.id)
+          .maybeSingle();
+
+      // If no profile exists, create one
+      if (profileResponse == null) {
+        await supabase.from('profiles').insert({
+          'id': user.id,
+          'full_name': user.userMetadata?['full_name'] ?? '',
+          'email': user.email ?? '',
+          'created_at': DateTime.now().toIso8601String(),
+        });
+        debugPrint('Profile created for user: ${user.id}');
+      }
+    } catch (e) {
+      debugPrint('Error ensuring profile exists: $e');
     }
   }
 
@@ -89,7 +117,11 @@ class _LoginPageState extends State<LoginPage> {
       final user = supabase.auth.currentUser;
       if (user == null) return;
 
-      final response = await supabase
+      // Ensure profile exists
+      await _ensureProfileExists(user);
+
+      // Check if user has completed fitness onboarding
+      final fitnessResponse = await supabase
           .from('user_fitness')
           .select()
           .eq('id', user.id)
@@ -97,7 +129,7 @@ class _LoginPageState extends State<LoginPage> {
 
       if (!mounted) return;
 
-      if (response == null) {
+      if (fitnessResponse == null) {
         // First time user - go to onboarding
         Navigator.pushReplacement(
           context,
