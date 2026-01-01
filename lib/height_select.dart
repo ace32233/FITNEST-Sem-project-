@@ -1,26 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        textTheme: GoogleFonts.poppinsTextTheme(),
-      ),
-      home: const HeightSelectionScreen(),
-    );
-  }
-}
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'home_page.dart';
 
 class HeightSelectionScreen extends StatefulWidget {
-  const HeightSelectionScreen({super.key});
+  final String selectedGender;
+  final int selectedAge;
+  final int selectedWeight;
+
+  const HeightSelectionScreen({
+    super.key,
+    required this.selectedGender,
+    required this.selectedAge,
+    required this.selectedWeight,
+  });
+
   @override
   State<HeightSelectionScreen> createState() => _HeightSelectionScreenState();
 }
@@ -33,6 +27,9 @@ class _HeightSelectionScreenState extends State<HeightSelectionScreen> {
 
   int _selectedFeet = 5;
   int _selectedInches = 10;
+  bool _isLoading = false;
+
+  final supabase = Supabase.instance.client;
 
   @override
   void initState() {
@@ -48,6 +45,53 @@ class _HeightSelectionScreenState extends State<HeightSelectionScreen> {
     super.dispose();
   }
 
+  Future<void> _saveDataAndNavigate() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        _showError('User not authenticated');
+        return;
+      }
+
+      // Save fitness data to Supabase
+      await supabase.from('user_fitness').upsert({
+        'id': user.id,
+        'gender': widget.selectedGender,
+        'age': widget.selectedAge,
+        'weight_kg': widget.selectedWeight,
+        'height_ft': _selectedFeet,
+        'height_in': _selectedInches,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+
+      if (!mounted) return;
+
+      // Navigate to home page
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const HomePage()),
+        (route) => false,
+      );
+    } catch (e) {
+      _showError('Failed to save data: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
@@ -58,14 +102,14 @@ class _HeightSelectionScreenState extends State<HeightSelectionScreen> {
       backgroundColor: const Color(0xFF0A2852),
       body: Stack(
         children: [
-          // 🔹 BACKGROUND WITH WAVE
-          Positioned.fill(
+          // BACKGROUND WITH WAVE
+          const Positioned.fill(
             child: CustomPaint(
               painter: WavePainter(),
             ),
           ),
 
-          // 🔹 FOREGROUND CONTENT
+          // FOREGROUND CONTENT
           SafeArea(
             child: Column(
               children: [
@@ -158,7 +202,7 @@ class _HeightSelectionScreenState extends State<HeightSelectionScreen> {
 
                                   return Center(
                                     child: Text(
-                                      '$feet ft', //value entry
+                                      '$feet ft',
                                       style: GoogleFonts.poppins(
                                         fontSize: fontSize,
                                         fontWeight: isCenter
@@ -235,7 +279,7 @@ class _HeightSelectionScreenState extends State<HeightSelectionScreen> {
 
                                   return Center(
                                     child: Text(
-                                      '$inches in', //value entry
+                                      '$inches in',
                                       style: GoogleFonts.poppins(
                                         fontSize: fontSize,
                                         fontWeight: isCenter
@@ -290,26 +334,34 @@ class _HeightSelectionScreenState extends State<HeightSelectionScreen> {
                     width: width * 0.436,
                     height: height * 0.050,
                     child: ElevatedButton(
-                      onPressed: () {
-                        // You can access the selected values here
-                        print('Selected: $_selectedFeet ft $_selectedInches in');
-                      },
+                      onPressed: _isLoading ? null : _saveDataAndNavigate,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.white,
+                        disabledBackgroundColor: Colors.white70,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(40),
                         ),
                         elevation: 3,
                       ),
-                      child: Text(
-                        'Confirm',
-                        style: GoogleFonts.poppins(
-                          fontSize: width * 0.052,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.black,
-                          letterSpacing: 2,
-                        ),
-                      ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor:
+                                    AlwaysStoppedAnimation<Color>(Colors.black),
+                              ),
+                            )
+                          : Text(
+                              'Confirm',
+                              style: GoogleFonts.poppins(
+                                fontSize: width * 0.052,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.black,
+                                letterSpacing: 2,
+                              ),
+                            ),
                     ),
                   ),
                 ),
@@ -322,8 +374,9 @@ class _HeightSelectionScreenState extends State<HeightSelectionScreen> {
   }
 }
 
-/// 🔹 EXACT WAVE BACKGROUND PAINTER
 class WavePainter extends CustomPainter {
+  const WavePainter();
+
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
@@ -333,37 +386,25 @@ class WavePainter extends CustomPainter {
 
     final path = Path();
     
-    // Starting point (left side)
     final startY = size.height * 0.59;
     path.moveTo(0, startY);
     
-    // First curve - smooth transition to the valley
-    final cp1X = size.width * 0.10;
-    final cp1Y = size.height * 0.70;
-    final cp2X = size.width * 0.25;
-    final cp2Y = size.height * 0.71;
-    final endX1 = size.width * 0.35;
-    final endY1 = size.height * 0.695;
+    path.cubicTo(
+      size.width * 0.10, size.height * 0.70,
+      size.width * 0.25, size.height * 0.71,
+      size.width * 0.35, size.height * 0.695,
+    );
     
-    path.cubicTo(cp1X, cp1Y, cp2X, cp2Y, endX1, endY1);
+    path.cubicTo(
+      size.width * 0.45, size.height * 0.68,
+      size.width * 0.75, size.height * 0.60,
+      size.width * 0.89, size.height * 0.664,
+    );
     
-    // Second curve - gentle rise to the peak
-    final cp3X = size.width * 0.45;
-    final cp3Y = size.height * 0.68;
-    final cp4X = size.width * 0.75;
-    final cp4Y = size.height * 0.60;
-    final endX2 = size.width * 0.89;
-    final endY2 = size.height * 0.664;
-    
-    path.cubicTo(cp3X, cp3Y, cp4X, cp4Y, endX2, endY2);
-    
-    // Final segment to right edge
-    final cp5X = size.width * 0.90;
-    final cp5Y = size.height * 0.6662;
-    final endX3 = size.width;
-    final endY3 = size.height * 0.715;
-    
-    path.quadraticBezierTo(cp5X, cp5Y, endX3, endY3);
+    path.quadraticBezierTo(
+      size.width * 0.90, size.height * 0.6662,
+      size.width, size.height * 0.715,
+    );
 
     canvas.drawPath(path, paint);
   }
