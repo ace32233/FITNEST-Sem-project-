@@ -77,7 +77,7 @@ class _IntroPageState extends State<IntroPage> with SingleTickerProviderStateMix
     final size = MediaQuery.of(context).size;
 
     return Scaffold(
-      backgroundColor: Color(0xFF0A2852),
+      backgroundColor: Color(0xFFE4FBD6),
       body: SafeArea(
         child: Center(
           child: AnimatedBuilder(
@@ -94,7 +94,7 @@ class _IntroPageState extends State<IntroPage> with SingleTickerProviderStateMix
             child: Text(
               "FITNEST",
               style: GoogleFonts.suezOne(
-                color: Colors.white,
+                color:Color(0xFF3A3016),
                 fontSize: size.width * 0.15,
                 fontWeight: FontWeight.w500,
                 letterSpacing: 5.5,

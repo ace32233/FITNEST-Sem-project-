@@ -107,7 +107,7 @@ class _AuthGateState extends State<AuthGate> {
   Future<void> _ensureProfileExists(User user) async {
     try {
       final supabase = Supabase.instance.client;
-      
+
       // Check if profile exists
       final profileResponse = await supabase
           .from('profiles')
@@ -135,9 +135,7 @@ class _AuthGateState extends State<AuthGate> {
     if (_isLoading) {
       return const Scaffold(
         backgroundColor: Color(0xFF0A2852),
-        body: Center(
-          child: CircularProgressIndicator(color: Colors.white),
-        ),
+        body: Center(child: CircularProgressIndicator(color: Colors.white)),
       );
     }
 

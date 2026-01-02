@@ -165,7 +165,7 @@ class _LoginPageState extends State<LoginPage> {
     final size = MediaQuery.of(context).size;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0A2852),
+      backgroundColor: const Color(0xFFE4FBD6),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: EdgeInsets.symmetric(horizontal: size.width * 0.05),
@@ -181,7 +181,7 @@ class _LoginPageState extends State<LoginPage> {
                   style: GoogleFonts.pacifico(
                     fontSize: size.width * 0.13,
                     letterSpacing: 3,
-                    color: Colors.white,
+                    color: Color(0xFF3A3016),
                   ),
                 ),
               ),
@@ -205,12 +205,12 @@ class _LoginPageState extends State<LoginPage> {
                 children: [
                   Checkbox(
                     value: _rememberMe,
-                    activeColor: const Color(0xFF6C63FF),
+                    activeColor: const Color(0xFF3A3016),
                     onChanged: (v) => setState(() => _rememberMe = v ?? false),
                   ),
                   Text(
                     "Remember Me",
-                    style: _textStyle(14, Colors.white),
+                    style: _textStyle(14, Color(0xFF3A3016)),
                   ),
                 ],
               ),
@@ -304,7 +304,7 @@ class _LoginPageState extends State<LoginPage> {
           style: _textStyle(15),
           decoration: InputDecoration(
             filled: true,
-            fillColor: const Color(0xFF3C3C3C),
+            fillColor: const Color(0xFFFFFFFF),
             hintText: hint,
             hintStyle: _textStyle(15, Colors.white38),
             border: OutlineInputBorder(
@@ -324,7 +324,7 @@ class _LoginPageState extends State<LoginPage> {
   ]) {
     return GoogleFonts.poppins(
       fontSize: size,
-      color: color ?? Colors.white,
+      color: color ?? Color(0xFF3A3016),
       fontWeight: weight,
     );
   }
