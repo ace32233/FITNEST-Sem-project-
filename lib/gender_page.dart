@@ -10,22 +10,21 @@ class GenderScreen extends StatefulWidget {
 }
 
 class _GenderScreenState extends State<GenderScreen> {
-  String? selected;
+  String? _selectedGender;
 
-  static const bgColor = Color(0xFF0A2852);
+  static const _bgColor = Color(0xFF0A2852);
 
   @override
   Widget build(BuildContext context) {
-    // Get screen dimensions for proportional scaling
     final screenHeight = MediaQuery.of(context).size.height;
     final screenWidth = MediaQuery.of(context).size.width;
 
     return Scaffold(
-      backgroundColor: bgColor,
+      backgroundColor: _bgColor,
       body: Stack(
         children: [
           // WAVE BACKGROUND
-          Positioned.fill(
+          const Positioned.fill(
             child: CustomPaint(
               painter: WavePainter(),
             ),
@@ -37,7 +36,6 @@ class _GenderScreenState extends State<GenderScreen> {
               width: double.infinity,
               child: Column(
                 children: [
-                  // TOP SPACING
                   SizedBox(height: screenHeight * 0.065),
 
                   // TITLE
@@ -46,7 +44,6 @@ class _GenderScreenState extends State<GenderScreen> {
                     style: GoogleFonts.poppins(
                       fontSize: screenWidth * 0.067,
                       fontWeight: FontWeight.w700,
-                      fontStyle: FontStyle.normal,
                       color: Colors.white,
                       letterSpacing: screenWidth * 0.004,
                     ),
@@ -63,16 +60,20 @@ class _GenderScreenState extends State<GenderScreen> {
                       letterSpacing: screenWidth * 0.0033,
                     ),
                   ),
+
                   SizedBox(height: screenHeight * 0.08),
                   
-                  // FLEXIBLE CENTER
+                  // GENDER OPTIONS
                   Expanded(
                     child: Column(
+                      mainAxisAlignment: MainAxisAlignment.start,
                       children: [
-                        buildGenderOption(
+                        _GenderOption(
                           label: 'Male',
                           icon: Icons.male,
                           value: 'male',
+                          isSelected: _selectedGender == 'male',
+                          onTap: () => setState(() => _selectedGender = 'male'),
                           size: screenWidth * 0.44,
                           iconSize: screenWidth * 0.28,
                           fontSize: screenWidth * 0.05,
@@ -82,10 +83,12 @@ class _GenderScreenState extends State<GenderScreen> {
 
                         SizedBox(height: screenHeight * 0.09),
 
-                        buildGenderOption(
+                        _GenderOption(
                           label: 'Female',
                           icon: Icons.female,
                           value: 'female',
+                          isSelected: _selectedGender == 'female',
+                          onTap: () => setState(() => _selectedGender = 'female'),
                           size: screenWidth * 0.44,
                           iconSize: screenWidth * 0.28,
                           fontSize: screenWidth * 0.05,
@@ -103,13 +106,15 @@ class _GenderScreenState extends State<GenderScreen> {
                       width: screenWidth * 0.41,
                       height: screenHeight * 0.053,
                       child: ElevatedButton(
-                        onPressed: selected == null
+                        onPressed: _selectedGender == null
                             ? null
                             : () {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (_) => const AgeSelectionScreen(),
+                                    builder: (_) => AgeSelectionScreen(
+                                      selectedGender: _selectedGender!,
+                                    ),
                                   ),
                                 );
                               },
@@ -141,22 +146,38 @@ class _GenderScreenState extends State<GenderScreen> {
       ),
     );
   }
+}
 
-  // ---------- GENDER OPTION ----------
-  Widget buildGenderOption({
-    required String label,
-    required IconData icon,
-    required String value,
-    required double size,
-    required double iconSize,
-    required double fontSize,
-    required double letterSpacing,
-    required double borderWidth,
-  }) {
-    final isSelected = selected == value;
+// Extracted as a separate stateless widget for better performance
+class _GenderOption extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final String value;
+  final bool isSelected;
+  final VoidCallback onTap;
+  final double size;
+  final double iconSize;
+  final double fontSize;
+  final double letterSpacing;
+  final double borderWidth;
 
+  const _GenderOption({
+    required this.label,
+    required this.icon,
+    required this.value,
+    required this.isSelected,
+    required this.onTap,
+    required this.size,
+    required this.iconSize,
+    required this.fontSize,
+    required this.letterSpacing,
+    required this.borderWidth,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => setState(() => selected = value),
+      onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         height: size,
@@ -195,6 +216,8 @@ class _GenderScreenState extends State<GenderScreen> {
 }
 
 class WavePainter extends CustomPainter {
+  const WavePainter();
+
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
@@ -209,32 +232,24 @@ class WavePainter extends CustomPainter {
     path.moveTo(0, startY);
     
     // First curve - smooth transition to the valley
-    final cp1X = size.width * 0.10;
-    final cp1Y = size.height * 0.70;
-    final cp2X = size.width * 0.25;
-    final cp2Y = size.height * 0.71;
-    final endX1 = size.width * 0.35;
-    final endY1 = size.height * 0.695;
-    
-    path.cubicTo(cp1X, cp1Y, cp2X, cp2Y, endX1, endY1);
+    path.cubicTo(
+      size.width * 0.10, size.height * 0.70,
+      size.width * 0.25, size.height * 0.71,
+      size.width * 0.35, size.height * 0.695,
+    );
     
     // Second curve - gentle rise to the peak
-    final cp3X = size.width * 0.45;
-    final cp3Y = size.height * 0.68;
-    final cp4X = size.width * 0.75;
-    final cp4Y = size.height * 0.60;
-    final endX2 = size.width * 0.89;
-    final endY2 = size.height * 0.664;
-    
-    path.cubicTo(cp3X, cp3Y, cp4X, cp4Y, endX2, endY2);
+    path.cubicTo(
+      size.width * 0.45, size.height * 0.68,
+      size.width * 0.75, size.height * 0.60,
+      size.width * 0.89, size.height * 0.664,
+    );
     
     // Final segment to right edge
-    final cp5X = size.width * 0.90;
-    final cp5Y = size.height * 0.6662;
-    final endX3 = size.width;
-    final endY3 = size.height * 0.715;
-    
-    path.quadraticBezierTo(cp5X, cp5Y, endX3, endY3);
+    path.quadraticBezierTo(
+      size.width * 0.90, size.height * 0.6662,
+      size.width, size.height * 0.715,
+    );
 
     canvas.drawPath(path, paint);
   }
