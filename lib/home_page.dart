@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'calorie_page.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pedometer/pedometer.dart';
@@ -19,11 +19,11 @@ class _HomePageState extends State<HomePage> {
   // Data variables
   int _currentStreak = 0;
   int _steps = 0;
-  int _caloriesConsumed = 0;
+  final int _caloriesConsumed = 0;
   int _caloriesGoal = 2670;
-  int _proteinConsumed = 0;
-  int _fatConsumed = 0;
-  int _carbsConsumed = 0;
+  final int _proteinConsumed = 0;
+  final int _fatConsumed = 0;
+  final int _carbsConsumed = 0;
   int _waterIntake = 0;
   int _waterGoal = 3000;
   
@@ -214,8 +214,8 @@ class _HomePageState extends State<HomePage> {
         decoration: const BoxDecoration(
           color: Color(0xFF1E293B),
           borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(20),
-            topRight: Radius.circular(20),
+            topLeft: Radius.circular(30),
+            topRight: Radius.circular(30),
           ),
         ),
         padding: const EdgeInsets.all(24),
@@ -224,7 +224,7 @@ class _HomePageState extends State<HomePage> {
           children: [
             Container(
               width: 40,
-              height: 4,
+              height: 3,
               decoration: BoxDecoration(
                 color: Colors.grey[600],
                 borderRadius: BorderRadius.circular(2),
@@ -248,8 +248,12 @@ class _HomePageState extends State<HomePage> {
                   label: 'Calories',
                   color: Colors.blue,
                   onTap: () {
-                    Navigator.pop(context);
-                    // TODO: Navigate to calorie input screen
+                    Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => NutritionPage(),
+                                  ),
+                                );
                   },
                 ),
                 _buildAddOption(
