@@ -1,25 +1,6 @@
+import 'package:fittness_app/home_page.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({Key? key}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Water Tracker',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        textTheme: GoogleFonts.poppinsTextTheme(),
-      ),
-      home: const WaterTrackerPage(),
-    );
-  }
-}
+import 'calorie_page.dart';
 
 class WaterTrackerPage extends StatefulWidget {
   const WaterTrackerPage({Key? key}) : super(key: key);
@@ -31,10 +12,9 @@ class WaterTrackerPage extends StatefulWidget {
 class _WaterTrackerPageState extends State<WaterTrackerPage> {
   int currentWater = 0;
   int targetWater = 2500;
-  int quickAddAmount = 0;
+  int quickAddAmount = 50;
   Set<String> selectedReminders = {};
   List<Map<String, String>> customReminders = [];
-  final List<int> quickAddOptions = [150, 200, 300, 400, 500];
 
   void addWater() {
     setState(() {
@@ -42,16 +22,6 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
         currentWater += quickAddAmount;
       } else {
         currentWater = targetWater;
-      }
-    });
-  }
-
-  void removeWater() {
-    setState(() {
-      if (currentWater - quickAddAmount >= 0) {
-        currentWater -= quickAddAmount;
-      } else {
-        currentWater = 0;
       }
     });
   }
@@ -106,81 +76,6 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
               child: const Text('Set'),
             ),
           ],
-        );
-      },
-    );
-  }
-
-  void showQuickAddOptions() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (BuildContext context) {
-        return Container(
-          decoration: BoxDecoration(
-            color: const Color(0xFFB8B3E8),
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(20),
-              topRight: Radius.circular(20),
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 12),
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.5),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Select Amount',
-                style: TextStyle(
-                  color: Color(0xFF0D2F5C),
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 20),
-              ...quickAddOptions.map((amount) {
-                return InkWell(
-                  onTap: () {
-                    setState(() {
-                      quickAddAmount = amount;
-                    });
-                    Navigator.pop(context);
-                  },
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 16,
-                    ),
-                    decoration: BoxDecoration(
-                      color: quickAddAmount == amount
-                          ? Colors.white.withOpacity(0.3)
-                          : Colors.transparent,
-                    ),
-                    child: Text(
-                      '${amount}ml',
-                      style: TextStyle(
-                        color: const Color(0xFF0D2F5C),
-                        fontSize: 16,
-                        fontWeight: quickAddAmount == amount
-                            ? FontWeight.w600
-                            : FontWeight.w400,
-                      ),
-                    ),
-                  ),
-                );
-              }).toList(),
-              const SizedBox(height: 20),
-            ],
-          ),
         );
       },
     );
@@ -267,6 +162,113 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
     );
   }
 
+  void resetProgress() {
+    setState(() {
+      currentWater = 0;
+    });
+  }
+
+  void _showAddDialog() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF1E293B),
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(30),
+            topRight: Radius.circular(30),
+          ),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 3,
+              decoration: BoxDecoration(
+                color: Colors.grey[600],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Add Activity',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildAddOption(
+                  icon: Icons.restaurant,
+                  label: 'Calories',
+                  color: Colors.blue,
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => NutritionPage(),
+                      ),
+                    );
+                  },
+                ),
+                _buildAddOption(
+                  icon: Icons.fitness_center,
+                  label: 'Exercise',
+                  color: Colors.orange,
+                  onTap: () {
+                    Navigator.pop(context);
+                    // TODO: Navigate to exercise input screen
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAddOption({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        width: 90,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 32),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
@@ -274,6 +276,26 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
     
     return Scaffold(
       backgroundColor: const Color(0xFF0D2F5C),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0D2F5C),
+        elevation: 0,
+        title: Text(
+          "Today's Hydration",
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: isSmallScreen ? 20 : 22,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.white),
+            onPressed: resetProgress,
+            tooltip: 'Reset Progress',
+          ),
+        ],
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           child: Padding(
@@ -283,19 +305,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
             ),
             child: Column(
               children: [
-                // Title
-                Text(
-                  "Today's Hydration",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: isSmallScreen ? 22 : 24,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                SizedBox(height: size.height * 0.03),
-                
-                // Water Progress Circle with Wave
+                // Water Progress Circle
                 _buildWaterProgress(size, isSmallScreen),
                 SizedBox(height: size.height * 0.03),
                 
@@ -303,15 +313,46 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                 _buildQuickAddSection(size, isSmallScreen),
                 SizedBox(height: size.height * 0.02),
                 
-                // Weekly Hydration Plan
-                _buildWeeklyPlanCard(size, isSmallScreen),
-                SizedBox(height: size.height * 0.02),
-                
                 // Set Reminder Section
                 _buildReminderSection(isSmallScreen),
-                SizedBox(height: size.height * 0.02),
+                SizedBox(height: size.height * 0.1),
               ],
             ),
+          ),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: Colors.blue,
+        onPressed: _showAddDialog,
+        child: const Icon(Icons.add, size: 32),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      bottomNavigationBar: BottomAppBar(
+        color: const Color(0xFF1E293B),
+        shape: const CircularNotchedRectangle(),
+        notchMargin: 8,
+        child: SizedBox(
+          height: 60,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.home, color: Colors.blue, size: 28),
+                onPressed: () {
+                  Navigator.push(context,
+                      MaterialPageRoute(
+                        builder: (_) => HomePage(),
+                      ),);
+                },
+              ),
+              const SizedBox(width: 40), // Space for FAB
+              IconButton(
+                icon: const Icon(Icons.bar_chart, color: Colors.white, size: 28),
+                onPressed: () {
+                  // TODO: Navigate to stats page
+                },
+              ),
+            ],
           ),
         ),
       ),
@@ -343,7 +384,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
         ),
         // Progress circle (water fill)
         ClipOval(
-          child: Container(
+          child: SizedBox(
             width: circleSize,
             height: circleSize,
             child: Stack(
@@ -383,6 +424,15 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                 fontWeight: FontWeight.w400,
               ),
             ),
+            const SizedBox(height: 8),
+            Text(
+              '${(progress * 100).toInt()}%',
+              style: TextStyle(
+                color: Colors.black54,
+                fontSize: isSmallScreen ? 14 : 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ],
         ),
         // Set target button with bottle icon
@@ -392,10 +442,17 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
           child: GestureDetector(
             onTap: showSetTargetDialog,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: const Color(0xFF0D2F5C),
                 borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -410,7 +467,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                     'Set target',
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: isSmallScreen ? 10 : 11,
+                      fontSize: isSmallScreen ? 11 : 12,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -507,48 +564,6 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                 ),
               ),
             ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildWeeklyPlanCard(Size size, bool isSmallScreen) {
-    return Container(
-      padding: EdgeInsets.all(size.width * 0.04),
-      decoration: BoxDecoration(
-        color: const Color(0xFFB8B3E8),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Weekly Hydration Plan',
-                  style: TextStyle(
-                    color: const Color(0xFF0D2F5C),
-                    fontSize: isSmallScreen ? 15 : 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Plan your hydration for the week',
-                  style: TextStyle(
-                    color: const Color(0xFF4A4A7E),
-                    fontSize: isSmallScreen ? 11 : 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Icon(
-            Icons.chevron_right,
-            color: const Color(0xFF0D2F5C),
-            size: isSmallScreen ? 24 : 28,
           ),
         ],
       ),
@@ -658,56 +673,4 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
       ),
     );
   }
-}
-
-// Custom painter for wave decoration
-class WavePainter extends CustomPainter {
-  final bool isLeft;
-
-  WavePainter({required this.isLeft});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = const Color(0xFF5DC0F0)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
-
-    final path = Path();
-
-    if (isLeft) {
-      path.moveTo(size.width, 0);
-      path.quadraticBezierTo(
-        size.width * 0.5, size.height * 0.15,
-        size.width, size.height * 0.3,
-      );
-      path.quadraticBezierTo(
-        size.width * 0.5, size.height * 0.45,
-        size.width, size.height * 0.6,
-      );
-      path.quadraticBezierTo(
-        size.width * 0.5, size.height * 0.75,
-        size.width, size.height * 0.9,
-      );
-    } else {
-      path.moveTo(0, 0);
-      path.quadraticBezierTo(
-        size.width * 0.5, size.height * 0.15,
-        0, size.height * 0.3,
-      );
-      path.quadraticBezierTo(
-        size.width * 0.5, size.height * 0.45,
-        0, size.height * 0.6,
-      );
-      path.quadraticBezierTo(
-        size.width * 0.5, size.height * 0.75,
-        0, size.height * 0.9,
-      );
-    }
-
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

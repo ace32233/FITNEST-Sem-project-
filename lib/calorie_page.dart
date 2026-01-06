@@ -1,6 +1,8 @@
+import 'package:fittness_app/home_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'water_reminder.dart';
 
 class NutritionPage extends StatefulWidget {
   const NutritionPage({super.key});
@@ -56,6 +58,107 @@ class _NutritionPageState extends State<NutritionPage> {
     }
   }
 
+  void _showAddDialog() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF1E293B),
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(30),
+            topRight: Radius.circular(30),
+          ),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 3,
+              decoration: BoxDecoration(
+                color: Colors.grey[600],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Add Activity',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildAddOption(
+                  icon: Icons.water_drop,
+                  label: 'Water',
+                  color: Colors.cyan,
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => WaterTrackerPage(),
+                      ),
+                    );
+                  },
+                ),
+                _buildAddOption(
+                  icon: Icons.fitness_center,
+                  label: 'Exercise',
+                  color: Colors.orange,
+                  onTap: () {
+                    Navigator.pop(context);
+                    // TODO: Navigate to exercise input screen
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAddOption({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        width: 90,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 32),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -70,26 +173,52 @@ class _NutritionPageState extends State<NutritionPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(height: 20),
-                
-                // Nutrition Header
-                Text(
-                  'NUTRITION',
-                  style: GoogleFonts.roboto(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    letterSpacing: 2,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  "Today's Fuel",
-                  style: GoogleFonts.caveat(
-                    color: const Color(0xFFD4FF00),
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                  ),
+                // Back Button with Stack to not affect layout
+                Stack(
+                  children: [
+                    // Back Button positioned absolutely
+                    Positioned(
+                      top: 8,
+                      left: 0,
+                      child: IconButton(
+                        icon: const Icon(Icons.arrow_back, color: Colors.black),
+                        onPressed: () {
+                          Navigator.pop(context);
+                        },
+                        padding: EdgeInsets.zero,
+                      ),
+                    ),
+                    // Centered Title Section
+                    Padding(
+                      padding: const EdgeInsets.only(top: 20),
+                      child: Column(
+                        children: [
+                          Center(
+                            child: Text(
+                              'NUTRITION',
+                              style: GoogleFonts.roboto(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                                letterSpacing: 2,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Center(
+                            child: Text(
+                              "Today's Fuel",
+                              style: GoogleFonts.caveat(
+                                color: const Color(0xFFD4FF00),
+                                fontSize: 32,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 24),
 
@@ -308,9 +437,46 @@ class _NutritionPageState extends State<NutritionPage> {
                           meal['fat'],
                         ),
                       )),
-                const SizedBox(height: 32),
+                const SizedBox(height: 100), // Extra space for bottom nav
               ],
             ),
+          ),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: Colors.blue,
+        onPressed: _showAddDialog,
+        child: const Icon(Icons.add, size: 32),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      bottomNavigationBar: BottomAppBar(
+        color: const Color(0xFF1E293B),
+        shape: const CircularNotchedRectangle(),
+        notchMargin: 8,
+        child: SizedBox(
+          height: 60,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.home, color: Colors.blue, size: 28),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => HomePage(),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(width: 40), // Space for FAB
+              IconButton(
+                icon: const Icon(Icons.bar_chart, color: Colors.white, size: 28),
+                onPressed: () {
+                  // TODO: Navigate to stats page
+                },
+              ),
+            ],
           ),
         ),
       ),
