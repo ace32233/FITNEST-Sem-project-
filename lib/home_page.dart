@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'calorie_page.dart';
+import 'water_reminder.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pedometer/pedometer.dart';
@@ -249,11 +250,11 @@ class _HomePageState extends State<HomePage> {
                   color: Colors.blue,
                   onTap: () {
                     Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => NutritionPage(),
-                                  ),
-                                );
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => NutritionPage(),
+                      ),
+                    );
                   },
                 ),
                 _buildAddOption(
@@ -261,7 +262,12 @@ class _HomePageState extends State<HomePage> {
                   label: 'Water',
                   color: Colors.cyan,
                   onTap: () {
-                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => WaterTrackerPage(),
+                      ),
+                    );
                     _addWater();
                   },
                 ),
