@@ -14,11 +14,11 @@ class _NutritionPageState extends State<NutritionPage> {
   final TextEditingController _amountController = TextEditingController();
 
   // Nutrition values that can be updated
-  double caloriesValue = 2230;
+  double caloriesValue = 0;
   double caloriesLimit = 2500;
-  double proteinPercent = 85;
-  double carbsPercent = 50;
-  double fatPercent = 92;
+  double proteinPercent = 0;
+  double carbsPercent = 0;
+  double fatPercent = 0;
 
   // Food log items
   List<Map<String, dynamic>> foodLog = [];
@@ -223,10 +223,10 @@ class _NutritionPageState extends State<NutritionPage> {
                                 FilteringTextInputFormatter.digitsOnly,
                               ],
                               decoration: InputDecoration(
-                                hintText: 'Grams/\nServings',
+                                hintText: 'Grams/Servings',
                                 hintStyle: GoogleFonts.roboto(
                                   color: Colors.white.withOpacity(0.6),
-                                  fontSize: 11,
+                                  fontSize: 10,
                                   height: 1.2,
                                 ),
                                 filled: true,
