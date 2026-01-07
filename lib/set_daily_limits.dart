@@ -1,129 +1,244 @@
-import 'package:flutter/material.dart';
 
-class LimitPage extends StatelessWidget {
-  const LimitPage({Key? key}) : super(key: key);
+
+
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+
+class LimitsPage extends StatefulWidget {
+  const LimitsPage({Key? key}) : super(key: key);
+
+  @override
+  State<LimitsPage> createState() => _LimitsPageState();
+}
+
+class _LimitsPageState extends State<LimitsPage> {
+  final TextEditingController calorieController = TextEditingController();
+  final TextEditingController proteinController = TextEditingController();
+  final TextEditingController carbsController = TextEditingController();
+  final TextEditingController fatsController = TextEditingController();
+
+  @override
+  void dispose() {
+    calorieController.dispose();
+    proteinController.dispose();
+    carbsController.dispose();
+    fatsController.dispose();
+    super.dispose();
+  }
+
+  void _saveAndReturn() {
+    final Map<String, String> dailyLimits = {
+      'calories': calorieController.text,
+      'protein': proteinController.text,
+      'carbs': carbsController.text,
+      'fats': fatsController.text,
+    };
+    Navigator.pop(context, dailyLimits);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+    
+    // Responsive sizing
+    final horizontalPadding = screenWidth * 0.045;
+    final boxHeight = screenHeight * 0.10;
+    final spacing = screenHeight * 0.03;
 
     return Scaffold(
-      body: Container(
-        width: size.width,
-        height: size.height,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFF0F2A44),
-              Color(0xFF1E3C5A),
-            ],
-          ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-            child: Column(
+      backgroundColor: const Color(0xFF0F2D52),
+      body: SafeArea(
+        child: Stack(
+          children: [
+            // Back button positioned absolutely
+            Positioned(
+              top: 16,
+              left: 16,
+              child: IconButton(
+                icon: const Icon(
+                  Icons.arrow_back,
+                  color: Colors.black,
+                  size: 24,
+                ),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+            
+            // Main content
+            Column(
               children: [
-                const SizedBox(height: 10),
-                const Text(
-                  "Set Daily Limits",
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                // Title
+                Padding(
+                  padding: EdgeInsets.only(
+                    top: screenHeight * 0.05,
+                    bottom: screenHeight * 0.05,
+                  ),
+                  child: Text(
+                    'Set Daily Limits',
+                    style: GoogleFonts.poppins(
+                      fontSize: screenWidth * 0.07,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
-                const SizedBox(height: 30),
 
-                LimitCard(title: "Calorie (kcal)", color: Color(0xFFE8E0FF)),
-                const SizedBox(height: 16),
-                LimitCard(title: "Protein (gm)", color: Color(0xFF4CC38A)),
-                const SizedBox(height: 16),
-                LimitCard(title: "Carbs (gm)", color: Color(0xFFF2F27C)),
-                const SizedBox(height: 16),
-                LimitCard(title: "Fats (gm)", color: Color(0xFFE36C3F)),
-
-                const SizedBox(height: 40),
-
-                SizedBox(
-                  width: size.width * 0.45,
-                  height: 50,
-                  child: ElevatedButton(
-                    onPressed: () {},
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
+                // Input fields
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+                  child: Column(
+                    children: [
+                      // Calories
+                      _buildInputField(
+                        label: 'Calorie(kcal)',
+                        controller: calorieController,
+                        backgroundColor: const Color(0xFFD4C5F9),
+                        textColor: const Color(0xFF2D1B4E),
+                        height: boxHeight,
+                        screenWidth: screenWidth,
                       ),
-                    ),
-                    child: const Text(
-                      "Save",
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black,
+                      
+                      SizedBox(height: spacing),
+                      
+                      // Protein
+                      _buildInputField(
+                        label: 'Protein(gm)',
+                        controller: proteinController,
+                        backgroundColor: const Color(0xFF5ECC7B),
+                        textColor: const Color(0xFF1B4D2E),
+                        height: boxHeight,
+                        screenWidth: screenWidth,
                       ),
-                    ),
+                      
+                      SizedBox(height: spacing),
+                      
+                      // Carbs
+                      _buildInputField(
+                        label: 'Carbs(gm)',
+                        controller: carbsController,
+                        backgroundColor: const Color(0xFFE8ED6C),
+                        textColor: const Color(0xFF4D4A1B),
+                        height: boxHeight,
+                        screenWidth: screenWidth,
+                      ),
+                      
+                      SizedBox(height: spacing),
+                      
+                      // Fats
+                      _buildInputField(
+                        label: 'Fats(gm)',
+                        controller: fatsController,
+                        backgroundColor: const Color(0xFFE86C52),
+                        textColor: const Color(0xFF4D1F1B),
+                        height: boxHeight,
+                        screenWidth: screenWidth,
+                      ),
+                      
+                      SizedBox(height: screenHeight * 0.10),
+                      
+                      // Save button
+                      ElevatedButton(
+                        onPressed: _saveAndReturn,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: const Color(0xFF0F2D52),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: screenWidth * 0.08,
+                            vertical: screenHeight * 0.010,
+                          ),
+                          elevation: 3,
+                        ),
+                        child: Text(
+                          'Save',
+                          style: GoogleFonts.poppins(
+                            fontSize: screenWidth * 0.072,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
-          ),
+          ],
         ),
       ),
     );
   }
-}
 
-class LimitCard extends StatelessWidget {
-  final String title;
-  final Color color;
-
-  const LimitCard({
-    Key? key,
-    required this.title,
-    required this.color,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-
+  Widget _buildInputField({
+    required String label,
+    required TextEditingController controller,
+    required Color backgroundColor,
+    required Color textColor,
+    required double height,
+    required double screenWidth,
+  }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+      height: height,
       decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(18),
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.white,
+          width: 1.75,
+        ),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          SizedBox(
-            width: size.width * 0.32,
-            height: 40,
-            child: TextField(
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                hintText: "Enter Value",
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide.none,
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.045),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 5,
+              child:              
+              Text(
+                label,
+                style: GoogleFonts.poppins(
+                  fontSize: screenWidth * 0.063,
+                  fontWeight: FontWeight.w500,
+                  color: textColor,
                 ),
               ),
             ),
-          ),
-        ],
+            Expanded(
+              flex: 4,
+              child: TextField(
+                controller: controller,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  fontSize: screenWidth * 0.04,
+                  fontWeight: FontWeight.w500,
+                  color: textColor.withOpacity(0.8),
+                ),
+                decoration: InputDecoration(
+                  hintText: 'Enter Value',
+                  hintStyle: GoogleFonts.poppins(
+                    fontSize: screenWidth * 0.035,
+                    color: textColor.withOpacity(0.5),
+                  ),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.9),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: screenWidth * 0.02,
+                    vertical: height * 0.1,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
