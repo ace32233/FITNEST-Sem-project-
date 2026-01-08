@@ -3,6 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'water_reminder.dart';
+import 'services/gemini_nutrition_service.dart';
+import 'services/supabase_nutrition_service.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
+
 
 class NutritionPage extends StatefulWidget {
   const NutritionPage({super.key});
@@ -13,49 +19,143 @@ class NutritionPage extends StatefulWidget {
 
 class _NutritionPageState extends State<NutritionPage> {
   final TextEditingController _foodController = TextEditingController();
-  final TextEditingController _amountController = TextEditingController();
+  final GeminiNutritionService _geminiService = GeminiNutritionService();
+  final SupabaseNutritionService _supabaseService = SupabaseNutritionService();
 
-  // Nutrition values that can be updated
+  // Nutrition values
   double caloriesValue = 0;
   double caloriesLimit = 2500;
-  double proteinPercent = 0;
-  double carbsPercent = 0;
-  double fatPercent = 0;
+  double proteinValue = 0;
+  double carbsValue = 0;
+  double fatValue = 0;
+
+  // Target values (in grams)
+  double proteinTarget = 150; // grams
+  double carbsTarget = 250; // grams
+  double fatTarget = 70; // grams
 
   // Food log items
   List<Map<String, dynamic>> foodLog = [];
+  bool isLoading = false;
+  bool isCalculating = false;
+
+  @override
+void initState() {
+  super.initState();
+   _loadTodayData();
+}
 
   @override
   void dispose() {
     _foodController.dispose();
-    _amountController.dispose();
     super.dispose();
   }
 
-  void _addMeal() {
-    if (_foodController.text.isNotEmpty && _amountController.text.isNotEmpty) {
+  Future<void> _loadTodayData() async {
+    setState(() => isLoading = true);
+
+    try {
+      // Load totals
+      final totals = await _supabaseService.getTodayTotals();
+      
+      // Load meal logs
+      final meals = await _supabaseService.getTodayMeals();
+
       setState(() {
-        // Add meal to food log (values are placeholders - will come from API)
-        foodLog.add({
-          'name': _foodController.text,
-          'amount': _amountController.text,
-          'calories': 400,
-          'protein': 40,
-          'carbs': 50,
-          'fat': 15,
+        caloriesValue = (totals['calories'] ?? 0).toDouble();
+        proteinValue = (totals['protein'] ?? 0).toDouble();
+        carbsValue = (totals['carbs'] ?? 0).toDouble();
+        fatValue = (totals['fat'] ?? 0).toDouble();
+        foodLog = meals;
+        isLoading = false;
+      });
+    } catch (e) {
+      print('Error loading data: $e');
+      setState(() => isLoading = false);
+      _showErrorSnackBar('Failed to load data');
+    }
+  }
+
+  Future<void> _addMeal() async {
+    if (_foodController.text.isEmpty) {
+      _showErrorSnackBar('Please enter food name');
+      return;
+    }
+
+    setState(() => isCalculating = true);
+
+    try {
+      // Call Gemini API
+      final nutritionData = await _geminiService.getNutritionInfo(_foodController.text);
+
+      if (nutritionData == null) {
+        _showErrorSnackBar('Could not fetch nutrition data. Please try again.');
+        setState(() => isCalculating = false);
+        return;
+      }
+
+      // Save to database
+      final success = await _supabaseService.logMeal(
+        foodName: nutritionData.foodName,
+        servingSize: nutritionData.servingSize,
+        calories: nutritionData.calories,
+        protein: nutritionData.protein,
+        carbs: nutritionData.carbs,
+        fat: nutritionData.fat,
+        activityDate: DateTime.now(),
+      );
+
+      if (success) {
+        // Update UI
+        setState(() {
+          caloriesValue += nutritionData.calories;
+          proteinValue += nutritionData.protein;
+          carbsValue += nutritionData.carbs;
+          fatValue += nutritionData.fat;
+
+          foodLog.insert(0, {
+            'food_name': nutritionData.foodName,
+            'serving_size': nutritionData.servingSize,
+            'calories': nutritionData.calories,
+            'protein_g': nutritionData.protein,
+            'carbs_g': nutritionData.carbs,
+            'fat_g': nutritionData.fat,
+          });
+
+          _foodController.clear();
+          isCalculating = false;
         });
 
-        // Update nutrition values (placeholder logic)
-        caloriesValue += 400;
-        proteinPercent = (proteinPercent + 10).clamp(0, 100);
-        carbsPercent = (carbsPercent + 5).clamp(0, 100);
-        fatPercent = (fatPercent + 8).clamp(0, 100);
-
-        // Clear inputs
-        _foodController.clear();
-        _amountController.clear();
-      });
+        _showSuccessSnackBar('Meal added successfully!');
+      } else {
+        setState(() => isCalculating = false);
+        _showErrorSnackBar('Failed to save meal');
+      }
+    } catch (e) {
+      print('Error adding meal: $e');
+      setState(() => isCalculating = false);
+      _showErrorSnackBar('An error occurred. Please try again.');
     }
+  }
+
+  void _showSuccessSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 
   void _showAddDialog() {
@@ -167,161 +267,155 @@ class _NutritionPageState extends State<NutritionPage> {
     return Scaffold(
       backgroundColor: const Color(0xFF0A2647),
       body: SafeArea(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Back Button with Stack to not affect layout
-                Stack(
-                  children: [
-                    // Back Button positioned absolutely
-                    Positioned(
-                      top: 8,
-                      left: 0,
-                      child: IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.black),
-                        onPressed: () {
-                          Navigator.pop(context);
-                        },
-                        padding: EdgeInsets.zero,
-                      ),
-                    ),
-                    // Centered Title Section
-                    Padding(
-                      padding: const EdgeInsets.only(top: 20),
-                      child: Column(
+        child: isLoading
+            ? const Center(
+                child: CircularProgressIndicator(color: Color(0xFF4ADE80)),
+              )
+            : SingleChildScrollView(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Back Button with Stack
+                      Stack(
                         children: [
-                          Center(
-                            child: Text(
-                              'NUTRITION',
-                              style: GoogleFonts.roboto(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                                letterSpacing: 2,
-                              ),
+                          Positioned(
+                            top: 8,
+                            left: 0,
+                            child: IconButton(
+                              icon: const Icon(Icons.arrow_back, color: Colors.white),
+                              onPressed: () => Navigator.pop(context),
+                              padding: EdgeInsets.zero,
                             ),
                           ),
-                          const SizedBox(height: 8),
-                          Center(
-                            child: Text(
-                              "Today's Fuel",
-                              style: GoogleFonts.caveat(
-                                color: const Color(0xFFD4FF00),
-                                fontSize: 32,
-                                fontWeight: FontWeight.bold,
-                              ),
+                          Padding(
+                            padding: const EdgeInsets.only(top: 20),
+                            child: Column(
+                              children: [
+                                Center(
+                                  child: Text(
+                                    'NUTRITION',
+                                    style: GoogleFonts.roboto(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                      letterSpacing: 2,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Center(
+                                  child: Text(
+                                    "Today's Fuel",
+                                    style: GoogleFonts.caveat(
+                                      color: const Color(0xFFD4FF00),
+                                      fontSize: 32,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
+                      const SizedBox(height: 24),
 
-                // Nutrition Cards Grid
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildNutritionCard(
-                        'Calories',
-                        '${caloriesValue.toInt()} kcal',
-                        caloriesValue / caloriesLimit,
-                        const Color(0xFFE6D5FF),
-                        const Color(0xFF7C3AED),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _buildNutritionCard(
-                        'Protein',
-                        '${proteinPercent.toInt()}%',
-                        proteinPercent / 100,
-                        const Color(0xFFB8F4D3),
-                        const Color(0xFF10B981),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildNutritionCard(
-                        'Carbs',
-                        '${carbsPercent.toInt()}%',
-                        carbsPercent / 100,
-                        const Color(0xFFFEF3C7),
-                        const Color(0xFFF59E0B),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _buildNutritionCard(
-                        'Fat',
-                        '${fatPercent.toInt()}%',
-                        fatPercent / 100,
-                        const Color(0xFFFFCDB2),
-                        const Color(0xFFEF4444),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-
-                // Set new limits link
-                Center(
-                  child: TextButton(
-                    onPressed: () {
-                      _showSetLimitsDialog();
-                    },
-                    child: Text(
-                      'Set new limits?',
-                      style: GoogleFonts.roboto(
-                        color: Colors.white,
-                        fontSize: 14,
-                        decoration: TextDecoration.underline,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                // Add Meal Section
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1A3A52),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: const Color(0xFF2D5F7E),
-                      width: 1,
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '+ Add Meal',
-                        style: GoogleFonts.roboto(
-                          color: const Color(0xFF4ADE80),
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
+                      // Nutrition Cards Grid
                       Row(
                         children: [
                           Expanded(
-                            flex: 2,
-                            child: TextField(
+                            child: _buildNutritionCard(
+                              'Calories',
+                              '${caloriesValue.toInt()} kcal',
+                              caloriesValue / caloriesLimit,
+                              const Color(0xFFE6D5FF),
+                              const Color(0xFF7C3AED),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _buildNutritionCard(
+                              'Protein',
+                              '${proteinValue.toInt()}g',
+                              proteinValue / proteinTarget,
+                              const Color(0xFFB8F4D3),
+                              const Color(0xFF10B981),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildNutritionCard(
+                              'Carbs',
+                              '${carbsValue.toInt()}g',
+                              carbsValue / carbsTarget,
+                              const Color(0xFFFEF3C7),
+                              const Color(0xFFF59E0B),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _buildNutritionCard(
+                              'Fat',
+                              '${fatValue.toInt()}g',
+                              fatValue / fatTarget,
+                              const Color(0xFFFFCDB2),
+                              const Color(0xFFEF4444),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Set new limits link
+                      Center(
+                        child: TextButton(
+                          onPressed: _showSetLimitsDialog,
+                          child: Text(
+                            'Set new limits?',
+                            style: GoogleFonts.roboto(
+                              color: Colors.white,
+                              fontSize: 14,
+                              decoration: TextDecoration.underline,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Add Meal Section
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1A3A52),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: const Color(0xFF2D5F7E),
+                            width: 1,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '+ Add Meal',
+                              style: GoogleFonts.roboto(
+                                color: const Color(0xFF4ADE80),
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            TextField(
                               controller: _foodController,
                               style: GoogleFonts.roboto(color: Colors.white),
                               decoration: InputDecoration(
-                                hintText: 'What did you eat?(e.g. Eggs)',
+                                hintText: 'e.g., Chicken 200g or 2 eggs',
                                 hintStyle: GoogleFonts.roboto(
                                   color: Colors.white.withOpacity(0.5),
                                   fontSize: 13,
@@ -338,110 +432,86 @@ class _NutritionPageState extends State<NutritionPage> {
                                 ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextField(
-                              controller: _amountController,
-                              style: GoogleFonts.roboto(
-                                color: Colors.white,
-                                fontSize: 14,
+                            const SizedBox(height: 16),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                onPressed: isCalculating ? null : _addMeal,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF4ADE80),
+                                  foregroundColor: Colors.black,
+                                  padding: const EdgeInsets.symmetric(vertical: 16),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  elevation: 0,
+                                  disabledBackgroundColor: Colors.grey,
+                                ),
+                                child: isCalculating
+                                    ? const SizedBox(
+                                        height: 20,
+                                        width: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
+                                        ),
+                                      )
+                                    : Text(
+                                        'Calculate',
+                                        style: GoogleFonts.roboto(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
                               ),
-                              keyboardType: TextInputType.number,
-                              inputFormatters: [
-                                FilteringTextInputFormatter.digitsOnly,
-                              ],
-                              decoration: InputDecoration(
-                                hintText: 'Grams/Servings',
-                                hintStyle: GoogleFonts.roboto(
-                                  color: Colors.white.withOpacity(0.6),
-                                  fontSize: 10,
-                                  height: 1.2,
-                                ),
-                                filled: true,
-                                fillColor: const Color(0xFF2D5F7E),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide.none,
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 14,
-                                ),
-                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: _addMeal,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF4ADE80),
-                            foregroundColor: Colors.black,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            elevation: 0,
-                          ),
-                          child: Text(
-                            'Calculate',
-                            style: GoogleFonts.roboto(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
+                          ],
                         ),
                       ),
+                      const SizedBox(height: 32),
+
+                      // Food Log Section
+                      Text(
+                        'Food Log',
+                        style: GoogleFonts.caveat(
+                          color: const Color(0xFF4ADE80),
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Food Log Items
+                      if (foodLog.isEmpty)
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(32.0),
+                            child: Text(
+                              'No meals logged yet',
+                              style: GoogleFonts.roboto(
+                                color: Colors.white54,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        )
+                      else
+                        ...foodLog.map((meal) => Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: _buildFoodLogItem(
+                                meal['food_name'],
+                                meal['serving_size'],
+                                (meal['calories'] as num).toInt(),
+                                (meal['protein_g'] as num).toInt(),
+                                (meal['carbs_g'] as num).toInt(),
+                                (meal['fat_g'] as num).toInt(),
+                              ),
+                            )),
+                      const SizedBox(height: 100),
                     ],
                   ),
                 ),
-                const SizedBox(height: 32),
-
-                // Food Log Section
-                Text(
-                  'Food Log',
-                  style: GoogleFonts.caveat(
-                    color: const Color(0xFF4ADE80),
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Food Log Items
-                if (foodLog.isEmpty)
-                  Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(32.0),
-                      child: Text(
-                        'No meals logged yet',
-                        style: GoogleFonts.roboto(
-                          color: Colors.white54,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                  )
-                else
-                  ...foodLog.map((meal) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _buildFoodLogItem(
-                          meal['name'],
-                          meal['calories'],
-                          meal['protein'],
-                          meal['carbs'],
-                          meal['fat'],
-                        ),
-                      )),
-                const SizedBox(height: 100), // Extra space for bottom nav
-              ],
-            ),
-          ),
-        ),
+              ),
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.blue,
@@ -463,18 +533,14 @@ class _NutritionPageState extends State<NutritionPage> {
                 onPressed: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (_) => HomePage(),
-                    ),
+                    MaterialPageRoute(builder: (_) => HomePage()),
                   );
                 },
               ),
-              const SizedBox(width: 40), // Space for FAB
+              const SizedBox(width: 40),
               IconButton(
                 icon: const Icon(Icons.bar_chart, color: Colors.white, size: 28),
-                onPressed: () {
-                  // TODO: Navigate to stats page
-                },
+                onPressed: () {},
               ),
             ],
           ),
@@ -532,7 +598,7 @@ class _NutritionPageState extends State<NutritionPage> {
               ),
               const SizedBox(width: 8),
               Text(
-                '100%',
+                '${(progress * 100).toInt()}%',
                 style: GoogleFonts.roboto(
                   color: Colors.black54,
                   fontSize: 12,
@@ -548,6 +614,7 @@ class _NutritionPageState extends State<NutritionPage> {
 
   Widget _buildFoodLogItem(
     String name,
+    String servingSize,
     int calories,
     int protein,
     int carbs,
@@ -565,7 +632,6 @@ class _NutritionPageState extends State<NutritionPage> {
       ),
       child: Row(
         children: [
-          // Food Image Placeholder
           Container(
             width: 60,
             height: 60,
@@ -590,6 +656,14 @@ class _NutritionPageState extends State<NutritionPage> {
                     color: Colors.white,
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  servingSize,
+                  style: GoogleFonts.roboto(
+                    color: Colors.white60,
+                    fontSize: 12,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -619,11 +693,7 @@ class _NutritionPageState extends State<NutritionPage> {
   Widget _buildNutrientInfo(IconData icon, String text) {
     return Row(
       children: [
-        Icon(
-          icon,
-          color: Colors.white54,
-          size: 14,
-        ),
+        Icon(icon, color: Colors.white54, size: 14),
         const SizedBox(width: 4),
         Text(
           text,
@@ -637,8 +707,14 @@ class _NutritionPageState extends State<NutritionPage> {
   }
 
   void _showSetLimitsDialog() {
-    final TextEditingController caloriesController = 
+    final TextEditingController caloriesController =
         TextEditingController(text: caloriesLimit.toInt().toString());
+    final TextEditingController proteinController =
+        TextEditingController(text: proteinTarget.toInt().toString());
+    final TextEditingController carbsController =
+        TextEditingController(text: carbsTarget.toInt().toString());
+    final TextEditingController fatController =
+        TextEditingController(text: fatTarget.toInt().toString());
 
     showDialog(
       context: context,
@@ -651,19 +727,18 @@ class _NutritionPageState extends State<NutritionPage> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        content: TextField(
-          controller: caloriesController,
-          style: GoogleFonts.roboto(color: Colors.white),
-          keyboardType: TextInputType.number,
-          decoration: InputDecoration(
-            labelText: 'Daily Calorie Limit',
-            labelStyle: GoogleFonts.roboto(color: Colors.white70),
-            enabledBorder: const UnderlineInputBorder(
-              borderSide: BorderSide(color: Colors.white54),
-            ),
-            focusedBorder: const UnderlineInputBorder(
-              borderSide: BorderSide(color: Color(0xFF4ADE80)),
-            ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildLimitField('Calories (kcal)', caloriesController),
+              const SizedBox(height: 16),
+              _buildLimitField('Protein (g)', proteinController),
+              const SizedBox(height: 16),
+              _buildLimitField('Carbs (g)', carbsController),
+              const SizedBox(height: 16),
+              _buildLimitField('Fat (g)', fatController),
+            ],
           ),
         ),
         actions: [
@@ -678,6 +753,9 @@ class _NutritionPageState extends State<NutritionPage> {
             onPressed: () {
               setState(() {
                 caloriesLimit = double.tryParse(caloriesController.text) ?? caloriesLimit;
+                proteinTarget = double.tryParse(proteinController.text) ?? proteinTarget;
+                carbsTarget = double.tryParse(carbsController.text) ?? carbsTarget;
+                fatTarget = double.tryParse(fatController.text) ?? fatTarget;
               });
               Navigator.pop(context);
             },
@@ -694,4 +772,23 @@ class _NutritionPageState extends State<NutritionPage> {
       ),
     );
   }
+
+  Widget _buildLimitField(String label, TextEditingController controller) {
+    return TextField(
+      controller: controller,
+      style: GoogleFonts.roboto(color: Colors.white),
+      keyboardType: TextInputType.number,
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: GoogleFonts.roboto(color: Colors.white70),
+        enabledBorder: const UnderlineInputBorder(
+          borderSide: BorderSide(color: Colors.white54),
+        ),
+        focusedBorder: const UnderlineInputBorder(
+          borderSide: BorderSide(color: Color(0xFF4ADE80)),
+        ),
+      ),
+    );
+  }
+  
 }

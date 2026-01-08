@@ -37,6 +37,7 @@ dependencies:
   pedometer: ^4.0.2
   permission_handler: ^11.0.0
   google_generative_language_api: ^0.2.1
+  google_generative_ai: ^0.4.0 
 
 
 

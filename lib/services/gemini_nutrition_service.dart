@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:google_generative_ai/google_generative_ai.dart';
 
+// Keep your NutritionData class exactly as it is (no changes needed there)
 class NutritionData {
   final String foodName;
   final String servingSize;
@@ -28,26 +29,17 @@ class NutritionData {
       fat: (json['fat_g'] ?? 0).toDouble(),
     );
   }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'food_name': foodName,
-      'serving_size': servingSize,
-      'calories': calories,
-      'protein_g': protein,
-      'carbs_g': carbs,
-      'fat_g': fat,
-    };
-  }
 }
 
 class GeminiNutritionService {
+  // Your working API Key
   static const String apiKey = 'AIzaSyAj1xbZrrIKQTAa_WCDvI1bWl-6HfQ3c30';
   late final GenerativeModel _model;
 
   GeminiNutritionService() {
+    
     _model = GenerativeModel(
-      model: 'gemini-pro',
+      model: 'gemini-2.5-pro', 
       apiKey: apiKey,
     );
   }
@@ -55,58 +47,40 @@ class GeminiNutritionService {
   Future<NutritionData?> getNutritionInfo(String foodInput) async {
     try {
       final prompt = '''
-You are a nutrition expert. Analyze the following food input and provide accurate nutritional information.
+ Analyze the following food item: "$foodInput"
 
-Food input: "$foodInput"
-
-Please provide the nutritional information in the following JSON format ONLY. Do not include any other text, explanations, or markdown formatting:
+Return the data as a strictly valid JSON object. 
+Do not include markdown formatting, backticks, or any preamble. 
+If the food is unknown, return null for the numeric values.
 
 {
-  "food_name": "name of the food item",
-  "serving_size": "the serving size mentioned (e.g., '200g', '1 cup', '2 pieces')",
-  "calories": numeric value in kcal,
-  "protein_g": numeric value in grams,
-  "carbs_g": numeric value in grams,
-  "fat_g": numeric value in grams
+  "food_name": "string",
+  "serving_size": "string (e.g., '100g' or '1 cup')",
+  "calories": number,
+  "protein_g": number,
+  "carbs_g": number,
+  "fat_g": number
 }
-
-Rules:
-- If no quantity is specified, assume a standard serving size
-- Provide realistic and accurate nutritional values based on USDA or common nutrition databases
-- All numeric values should be numbers, not strings
-- Round values to 1 decimal place
-- Return only valid JSON, no additional text
 ''';
 
       final content = [Content.text(prompt)];
       final response = await _model.generateContent(content);
 
-      if (response.text == null || response.text!.isEmpty) {
-        throw Exception('Empty response from Gemini API');
+      if (response.text == null) return null;
+
+      // Clean the response
+      String cleanJson = response.text!.replaceAll(RegExp(r'```json|```'), '').trim();
+      
+      // Extract just the JSON part { ... }
+      int start = cleanJson.indexOf('{');
+      int end = cleanJson.lastIndexOf('}');
+      if (start != -1 && end != -1) {
+        cleanJson = cleanJson.substring(start, end + 1);
       }
 
-      // Clean the response text
-      String jsonText = response.text!.trim();
-      
-      // Remove markdown code blocks if present
-      if (jsonText.startsWith('```json')) {
-        jsonText = jsonText.substring(7);
-      } else if (jsonText.startsWith('```')) {
-        jsonText = jsonText.substring(3);
-      }
-      
-      if (jsonText.endsWith('```')) {
-        jsonText = jsonText.substring(0, jsonText.length - 3);
-      }
-      
-      jsonText = jsonText.trim();
-
-      // Parse JSON
-      final Map<String, dynamic> nutritionJson = json.decode(jsonText);
-      
-      return NutritionData.fromJson(nutritionJson);
+      return NutritionData.fromJson(json.decode(cleanJson));
     } catch (e) {
-      print('Error getting nutrition info: $e');
+      print('Gemini Error: $e');
       return null;
     }
   }
