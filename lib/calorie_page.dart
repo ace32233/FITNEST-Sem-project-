@@ -42,8 +42,7 @@ class _NutritionPageState extends State<NutritionPage> {
   @override
 void initState() {
   super.initState();
-  listAvailableModels();                 // <--- ADD THIS LINE
-  _loadTodayData();
+   _loadTodayData();
 }
 
   @override
@@ -791,29 +790,5 @@ void initState() {
       ),
     );
   }
-  Future<void> listAvailableModels() async {
-  // Your Google API Key
-  const apiKey = 'AIzaSyAj1xbZrrIKQTAa_WCDvI1bWl-6HfQ3c30'; 
-  final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey');
-
-  try {
-    print('--- CHECKING MODELS ---');
-    final response = await http.get(url);
-    
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      // Loop through and print only the models that generate content
-      for (var model in data['models']) {
-        if (model['supportedGenerationMethods'].contains('generateContent')) {
-          print('VALID MODEL: ${model['name']}');
-        }
-      }
-    } else {
-      print('Error: ${response.statusCode} - ${response.body}');
-    }
-    print('-----------------------');
-  } catch (e) {
-    print('Connection Error: $e');
-  }
-}
+  
 }

@@ -37,9 +37,9 @@ class GeminiNutritionService {
   late final GenerativeModel _model;
 
   GeminiNutritionService() {
-    // FIXED: Using "gemini-1.5-flash-001" solves the "Not Found" error
+    
     _model = GenerativeModel(
-      model: 'gemini-2.5-flash', 
+      model: 'gemini-2.5-pro', 
       apiKey: apiKey,
     );
   }
@@ -47,17 +47,21 @@ class GeminiNutritionService {
   Future<NutritionData?> getNutritionInfo(String foodInput) async {
     try {
       final prompt = '''
-      Analyze food: "$foodInput". 
-      Return JSON ONLY. No markdown.
-      {
-        "food_name": "string",
-        "serving_size": "string",
-        "calories": number,
-        "protein_g": number,
-        "carbs_g": number,
-        "fat_g": number
-      }
-      ''';
+ Analyze the following food item: "$foodInput"
+
+Return the data as a strictly valid JSON object. 
+Do not include markdown formatting, backticks, or any preamble. 
+If the food is unknown, return null for the numeric values.
+
+{
+  "food_name": "string",
+  "serving_size": "string (e.g., '100g' or '1 cup')",
+  "calories": number,
+  "protein_g": number,
+  "carbs_g": number,
+  "fat_g": number
+}
+''';
 
       final content = [Content.text(prompt)];
       final response = await _model.generateContent(content);
