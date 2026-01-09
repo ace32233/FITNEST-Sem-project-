@@ -5,10 +5,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'water_reminder.dart';
 import 'services/gemini_nutrition_service.dart';
 import 'services/supabase_nutrition_service.dart';
+import 'services/user_goals_service.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-
-
 
 class NutritionPage extends StatefulWidget {
   const NutritionPage({super.key});
@@ -21,6 +20,7 @@ class _NutritionPageState extends State<NutritionPage> {
   final TextEditingController _foodController = TextEditingController();
   final GeminiNutritionService _geminiService = GeminiNutritionService();
   final SupabaseNutritionService _supabaseService = SupabaseNutritionService();
+  final UserGoalsService _goalsService = UserGoalsService();
 
   // Nutrition values
   double caloriesValue = 0;
@@ -30,9 +30,9 @@ class _NutritionPageState extends State<NutritionPage> {
   double fatValue = 0;
 
   // Target values (in grams)
-  double proteinTarget = 150; // grams
-  double carbsTarget = 250; // grams
-  double fatTarget = 70; // grams
+  double proteinTarget = 150;
+  double carbsTarget = 250;
+  double fatTarget = 70;
 
   // Food log items
   List<Map<String, dynamic>> foodLog = [];
@@ -40,10 +40,10 @@ class _NutritionPageState extends State<NutritionPage> {
   bool isCalculating = false;
 
   @override
-void initState() {
-  super.initState();
-   _loadTodayData();
-}
+  void initState() {
+    super.initState();
+    _loadTodayData();
+  }
 
   @override
   void dispose() {
@@ -55,6 +55,17 @@ void initState() {
     setState(() => isLoading = true);
 
     try {
+      // Load user goals first
+      final goalsData = await _goalsService.getUserGoals();
+      if (goalsData != null) {
+        setState(() {
+          caloriesLimit = (goalsData['calories_goal'] ?? 2500).toDouble();
+          proteinTarget = (goalsData['protein_goal_g'] ?? 150).toDouble();
+          carbsTarget = (goalsData['carbs_goal_g'] ?? 250).toDouble();
+          fatTarget = (goalsData['fat_goal_g'] ?? 70).toDouble();
+        });
+      }
+
       // Load totals
       final totals = await _supabaseService.getTodayTotals();
       
@@ -750,14 +761,32 @@ void initState() {
             ),
           ),
           ElevatedButton(
-            onPressed: () {
-              setState(() {
-                caloriesLimit = double.tryParse(caloriesController.text) ?? caloriesLimit;
-                proteinTarget = double.tryParse(proteinController.text) ?? proteinTarget;
-                carbsTarget = double.tryParse(carbsController.text) ?? carbsTarget;
-                fatTarget = double.tryParse(fatController.text) ?? fatTarget;
-              });
-              Navigator.pop(context);
+            onPressed: () async {
+              final newCalories = double.tryParse(caloriesController.text) ?? caloriesLimit;
+              final newProtein = double.tryParse(proteinController.text) ?? proteinTarget;
+              final newCarbs = double.tryParse(carbsController.text) ?? carbsTarget;
+              final newFat = double.tryParse(fatController.text) ?? fatTarget;
+
+              // Save to database
+              final success = await _goalsService.updateUserGoals(
+                caloriesGoal: newCalories.toInt(),
+                proteinGoal: newProtein.toInt(),
+                carbsGoal: newCarbs.toInt(),
+                fatGoal: newFat.toInt(),
+              );
+
+              if (success) {
+                setState(() {
+                  caloriesLimit = newCalories;
+                  proteinTarget = newProtein;
+                  carbsTarget = newCarbs;
+                  fatTarget = newFat;
+                });
+                Navigator.pop(context);
+                _showSuccessSnackBar('Goals updated successfully!');
+              } else {
+                _showErrorSnackBar('Failed to update goals');
+              }
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF4ADE80),
@@ -790,5 +819,4 @@ void initState() {
       ),
     );
   }
-  
 }

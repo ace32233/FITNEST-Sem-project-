@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pedometer/pedometer.dart';
 import 'dart:async';
 import 'intro_page.dart';
+import 'services/user_goals_service.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -16,15 +17,19 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final _supabase = Supabase.instance.client;
+  final _goalsService = UserGoalsService();
   
   // Data variables
   int _currentStreak = 0;
   int _steps = 0;
-  final int _caloriesConsumed = 0;
-  int _caloriesGoal = 2670;
-  final int _proteinConsumed = 0;
-  final int _fatConsumed = 0;
-  final int _carbsConsumed = 0;
+  int _caloriesConsumed = 0;
+  int _caloriesGoal = 2500;
+  int _proteinConsumed = 0;
+  int _proteinGoal = 150;
+  int _fatConsumed = 0;
+  int _fatGoal = 70;
+  int _carbsConsumed = 0;
+  int _carbsGoal = 250;
   int _waterIntake = 0;
   int _waterGoal = 3000;
   
@@ -92,6 +97,17 @@ class _HomePageState extends State<HomePage> {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) return;
 
+      // Load user goals first
+      final goalsData = await _goalsService.getUserGoals();
+      if (goalsData != null) {
+        setState(() {
+          _caloriesGoal = goalsData['calories_goal'] ?? 2500;
+          _proteinGoal = goalsData['protein_goal_g'] ?? 150;
+          _carbsGoal = goalsData['carbs_goal_g'] ?? 250;
+          _fatGoal = goalsData['fat_goal_g'] ?? 70;
+        });
+      }
+
       // Load streak data
       final streakData = await _supabase
           .from('user_streaks')
@@ -116,9 +132,37 @@ class _HomePageState extends State<HomePage> {
 
       if (activityData != null) {
         setState(() {
-          _caloriesGoal = activityData['calories_goal'] ?? 2670;
           _waterIntake = activityData['water_intake_ml'] ?? 0;
           _waterGoal = activityData['water_goal_ml'] ?? 3000;
+        });
+      }
+
+      // Load today's nutrition totals
+      final nutritionTotals = await _supabase
+          .from('meal_logs')
+          .select('calories, protein_g, carbs_g, fat_g')
+          .eq('user_id', userId)
+          .gte('activity_date', today)
+          .lt('activity_date', DateTime.now().add(const Duration(days: 1)).toIso8601String().split('T')[0]);
+
+      if (nutritionTotals.isNotEmpty) {
+        double totalCalories = 0;
+        double totalProtein = 0;
+        double totalCarbs = 0;
+        double totalFat = 0;
+
+        for (var meal in nutritionTotals) {
+          totalCalories += (meal['calories'] ?? 0).toDouble();
+          totalProtein += (meal['protein_g'] ?? 0).toDouble();
+          totalCarbs += (meal['carbs_g'] ?? 0).toDouble();
+          totalFat += (meal['fat_g'] ?? 0).toDouble();
+        }
+
+        setState(() {
+          _caloriesConsumed = totalCalories.toInt();
+          _proteinConsumed = totalProtein.toInt();
+          _carbsConsumed = totalCarbs.toInt();
+          _fatConsumed = totalFat.toInt();
         });
       }
     } catch (e) {
@@ -186,6 +230,54 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Future<void> _showSignOutDialog() async {
+    return showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: const Text(
+            'Sign Out',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: const Text(
+            'Are you sure you want to sign out?',
+            style: TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: Colors.grey),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _signOut();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: const Text('Sign Out'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _signOut() async {
     try {
       await _supabase.auth.signOut();
@@ -249,12 +341,13 @@ class _HomePageState extends State<HomePage> {
                   label: 'Calories',
                   color: Colors.blue,
                   onTap: () {
+                    Navigator.pop(context);
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => NutritionPage(),
+                        builder: (_) => const NutritionPage(),
                       ),
-                    );
+                    ).then((_) => _loadData());
                   },
                 ),
                 _buildAddOption(
@@ -262,13 +355,13 @@ class _HomePageState extends State<HomePage> {
                   label: 'Water',
                   color: Colors.cyan,
                   onTap: () {
+                    Navigator.pop(context);
                     Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (_) => WaterTrackerPage(),
                       ),
-                    );
-                    _addWater();
+                    ).then((_) => _loadData());
                   },
                 ),
                 _buildAddOption(
@@ -322,32 +415,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Future<void> _addWater() async {
-    try {
-      final userId = _supabase.auth.currentUser?.id;
-      if (userId == null) return;
-
-      final today = DateTime.now().toIso8601String().split('T')[0];
-      final newWaterIntake = _waterIntake + 250; // Add 250ml
-
-      await _supabase.from('daily_activities').upsert({
-        'user_id': userId,
-        'activity_date': today,
-        'water_intake_ml': newWaterIntake,
-        'water_goal_ml': _waterGoal,
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-
-      setState(() {
-        _waterIntake = newWaterIntake;
-      });
-
-      await _updateStreak();
-    } catch (e) {
-      debugPrint('Error adding water: $e');
-    }
-  }
-
   String getGreeting() {
     final hour = DateTime.now().hour;
     if (hour < 12) return "Good Morning ☀️";
@@ -385,7 +452,7 @@ class _HomePageState extends State<HomePage> {
         actions: [
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white),
-            onPressed: _signOut,
+            onPressed: _showSignOutDialog,
           ),
         ],
       ),
@@ -400,13 +467,32 @@ class _HomePageState extends State<HomePage> {
                 consumed: _caloriesConsumed,
                 goal: _caloriesGoal,
                 protein: _proteinConsumed,
+                proteinGoal: _proteinGoal,
                 fat: _fatConsumed,
+                fatGoal: _fatGoal,
                 carbs: _carbsConsumed,
+                carbsGoal: _carbsGoal,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const NutritionPage(),
+                    ),
+                  ).then((_) => _loadData());
+                },
               ),
               const SizedBox(height: 16),
               WaterTrackerCard(
                 consumed: _waterIntake,
                 goal: _waterGoal,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => WaterTrackerPage(),
+                    ),
+                  ).then((_) => _loadData());
+                },
               ),
               const SizedBox(height: 16),
               StepsCard(steps: _steps),
@@ -452,16 +538,24 @@ class CalorieDashboardCard extends StatelessWidget {
   final int consumed;
   final int goal;
   final int protein;
+  final int proteinGoal;
   final int fat;
+  final int fatGoal;
   final int carbs;
+  final int carbsGoal;
+  final VoidCallback onTap;
 
   const CalorieDashboardCard({
     super.key,
     required this.consumed,
     required this.goal,
     required this.protein,
+    required this.proteinGoal,
     required this.fat,
+    required this.fatGoal,
     required this.carbs,
+    required this.carbsGoal,
+    required this.onTap,
   });
 
   @override
@@ -469,75 +563,78 @@ class CalorieDashboardCard extends StatelessWidget {
     final remaining = goal - consumed;
     final progress = consumed / goal;
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            const Color(0xFF1E293B),
-            const Color(0xFF1E293B).withOpacity(0.8),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              const Color(0xFF1E293B),
+              const Color(0xFF1E293B).withOpacity(0.8),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              SizedBox(
-                height: 160,
-                width: 160,
-                child: CircularProgressIndicator(
-                  value: progress.clamp(0.0, 1.0),
-                  strokeWidth: 14,
-                  backgroundColor: Colors.grey.shade800,
-                  valueColor: AlwaysStoppedAnimation<Color>(
-                    progress > 1 ? Colors.red : Colors.blue,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  height: 160,
+                  width: 160,
+                  child: CircularProgressIndicator(
+                    value: progress.clamp(0.0, 1.0),
+                    strokeWidth: 14,
+                    backgroundColor: Colors.grey.shade800,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      progress > 1 ? Colors.red : Colors.blue,
+                    ),
                   ),
                 ),
-              ),
-              Column(
-                children: [
-                  Text(
-                    remaining >= 0 ? remaining.toString() : "Over!",
-                    style: const TextStyle(
-                      fontSize: 36,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                Column(
+                  children: [
+                    Text(
+                      remaining >= 0 ? remaining.toString() : "Over!",
+                      style: const TextStyle(
+                        fontSize: 36,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
                     ),
-                  ),
-                  Text(
-                    remaining >= 0 ? "Remaining" : "${-remaining} over",
-                    style: TextStyle(
-                      color: remaining >= 0 ? Colors.grey : Colors.red,
-                      fontSize: 14,
+                    Text(
+                      remaining >= 0 ? "Remaining" : "${-remaining} over",
+                      style: TextStyle(
+                        color: remaining >= 0 ? Colors.grey : Colors.red,
+                        fontSize: 14,
+                      ),
                     ),
-                  ),
-                ],
-              )
-            ],
-          ),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              MacroTile("Calories", "$consumed / $goal", Colors.blue),
-              MacroTile("Protein", "$protein g", Colors.green),
-              MacroTile("Fat", "$fat g", Colors.orange),
-              MacroTile("Carbs", "$carbs g", Colors.purple),
-            ],
-          ),
-        ],
+                  ],
+                )
+              ],
+            ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                MacroTile("Calories", "$consumed / $goal", Colors.blue),
+                MacroTile("Protein", "$protein / $proteinGoal g", Colors.green),
+                MacroTile("Fat", "$fat / $fatGoal g", Colors.orange),
+                MacroTile("Carbs", "$carbs / $carbsGoal g", Colors.purple),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -546,88 +643,93 @@ class CalorieDashboardCard extends StatelessWidget {
 class WaterTrackerCard extends StatelessWidget {
   final int consumed;
   final int goal;
+  final VoidCallback onTap;
 
   const WaterTrackerCard({
     super.key,
     required this.consumed,
     required this.goal,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final progress = consumed / goal;
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            const Color(0xFF1E293B),
-            const Color(0xFF1E293B).withOpacity(0.8),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              const Color(0xFF1E293B),
+              const Color(0xFF1E293B).withOpacity(0.8),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
-        ],
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "Water Intake",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "$consumed / $goal ml",
+                    style: const TextStyle(
+                      color: Colors.grey,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    "${(progress * 100).toInt()}% Complete",
+                    style: const TextStyle(
+                      color: Colors.blue,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Stack(
+              alignment: Alignment.center,
               children: [
-                const Text(
-                  "Water Intake",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
+                SizedBox(
+                  height: 80,
+                  width: 80,
+                  child: CircularProgressIndicator(
+                    value: progress.clamp(0.0, 1.0),
+                    strokeWidth: 8,
+                    backgroundColor: Colors.grey.shade800,
+                    valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
                   ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  "$consumed / $goal ml",
-                  style: const TextStyle(
-                    color: Colors.grey,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  "${(progress * 100).toInt()}% Complete",
-                  style: const TextStyle(
-                    color: Colors.blue,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                const Icon(Icons.water_drop, color: Colors.blue, size: 32),
               ],
             ),
-          ),
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              SizedBox(
-                height: 80,
-                width: 80,
-                child: CircularProgressIndicator(
-                  value: progress.clamp(0.0, 1.0),
-                  strokeWidth: 8,
-                  backgroundColor: Colors.grey.shade800,
-                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
-                ),
-              ),
-              const Icon(Icons.water_drop, color: Colors.blue, size: 32),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
