@@ -144,25 +144,7 @@ class VerificationScreen extends StatelessWidget {
 
               SizedBox(height: size.height * 0.03),
 
-              // Resend Link (Optional - can be implemented later)
-              TextButton(
-                onPressed: () {
-                  // TODO: Implement resend verification email
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Resend feature coming soon!'),
-                    ),
-                  );
-                },
-                child: Text(
-                  "Didn't receive the email? Resend",
-                  style: GoogleFonts.poppins(
-                    fontSize: size.width * 0.037,
-                    color: Colors.white70,
-                    decoration: TextDecoration.underline,
-                  ),
-                ),
-              ),
+              
             ],
           ),
         ),

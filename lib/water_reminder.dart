@@ -1,6 +1,8 @@
 import 'package:fittness_app/home_page.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'calorie_page.dart';
+import 'services/notification_service.dart';
 
 class WaterTrackerPage extends StatefulWidget {
   const WaterTrackerPage({Key? key}) : super(key: key);
@@ -13,8 +15,159 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
   int currentWater = 0;
   int targetWater = 2500;
   int quickAddAmount = 50;
-  Set<String> selectedReminders = {};
-  List<Map<String, String>> customReminders = [];
+  Map<String, ReminderData> reminders = {};
+  List<Map<String, dynamic>> customReminders = [];
+  final NotificationService _notificationService = NotificationService();
+  final _supabase = Supabase.instance.client;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeNotifications();
+    _loadTodayData();
+    _initializeDefaultReminders();
+  }
+
+  void _initializeDefaultReminders() {
+    reminders = {
+      'morning_7': ReminderData(
+        id: 'morning_7',
+        label: 'Morning',
+        time: '7 am',
+        hour: 7,
+        minute: 0,
+        isEnabled: false,
+        activeDays: {0, 1, 2, 3, 4, 5, 6}, // All days enabled by default
+      ),
+      'noon_11': ReminderData(
+        id: 'noon_11',
+        label: 'Noon',
+        time: '11 am',
+        hour: 11,
+        minute: 0,
+        isEnabled: false,
+        activeDays: {0, 1, 2, 3, 4, 5, 6},
+      ),
+      'afternoon_2': ReminderData(
+        id: 'afternoon_2',
+        label: 'Afternoon',
+        time: '2 pm',
+        hour: 14,
+        minute: 0,
+        isEnabled: false,
+        activeDays: {0, 1, 2, 3, 4, 5, 6},
+      ),
+      'afternoon_4': ReminderData(
+        id: 'afternoon_4',
+        label: 'Afternoon',
+        time: '4 pm',
+        hour: 16,
+        minute: 0,
+        isEnabled: false,
+        activeDays: {0, 1, 2, 3, 4, 5, 6},
+      ),
+      'evening_7': ReminderData(
+        id: 'evening_7',
+        label: 'Evening',
+        time: '7 pm',
+        hour: 19,
+        minute: 0,
+        isEnabled: false,
+        activeDays: {0, 1, 2, 3, 4, 5, 6},
+      ),
+    };
+  }
+
+  Future<void> _initializeNotifications() async {
+    await _notificationService.initialize();
+  }
+
+  Future<void> _loadTodayData() async {
+    setState(() => _isLoading = true);
+    
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) return;
+
+      final today = DateTime.now().toIso8601String().split('T')[0];
+      
+      final response = await _supabase
+          .from('daily_activities')
+          .select('water_intake_ml, water_goal_ml')
+          .eq('user_id', userId)
+          .eq('activity_date', today)
+          .maybeSingle();
+
+      if (response != null) {
+        setState(() {
+          currentWater = response['water_intake_ml'] ?? 0;
+          targetWater = response['water_goal_ml'] ?? 2500;
+        });
+      } else {
+        // Create today's record
+        await _supabase.from('daily_activities').insert({
+          'user_id': userId,
+          'activity_date': today,
+          'water_intake_ml': 0,
+          'water_goal_ml': targetWater,
+        });
+      }
+    } catch (e) {
+      print('Error loading water data: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading data: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _updateWaterIntake() async {
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) return;
+
+      final today = DateTime.now().toIso8601String().split('T')[0];
+      
+      await _supabase
+          .from('daily_activities')
+          .update({
+            'water_intake_ml': currentWater,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('user_id', userId)
+          .eq('activity_date', today);
+    } catch (e) {
+      print('Error updating water intake: $e');
+    }
+  }
+
+  Future<void> _scheduleReminder(ReminderData reminder) async {
+    if (!reminder.isEnabled || reminder.activeDays.isEmpty) {
+      await _cancelReminder(reminder.id);
+      return;
+    }
+
+    final notificationId = reminder.id.hashCode.abs();
+
+    await _notificationService.scheduleWaterReminder(
+      id: notificationId,
+      title: 'Time to Drink Water! 💧',
+      body: 'Stay hydrated! Drink ${quickAddAmount}ml of water now.',
+      hour: reminder.hour,
+      minute: reminder.minute,
+      activeDays: reminder.activeDays, // Pass active days to notification service
+    );
+
+    print('Scheduled reminder: ${reminder.label} at ${reminder.hour}:${reminder.minute} for days: ${reminder.activeDays} (ID: $notificationId)');
+  }
+
+  Future<void> _cancelReminder(String id) async {
+    final notificationId = id.hashCode.abs();
+    await _notificationService.cancelNotification(notificationId);
+    print('Cancelled reminder ID: $notificationId');
+  }
 
   void addWater() {
     setState(() {
@@ -24,6 +177,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
         currentWater = targetWater;
       }
     });
+    _updateWaterIntake();
   }
 
   void increaseQuickAddAmount() {
@@ -64,13 +218,30 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
               child: const Text('Cancel'),
             ),
             TextButton(
-              onPressed: () {
+              onPressed: () async {
+                final newTarget = int.tryParse(controller.text) ?? targetWater;
                 setState(() {
-                  targetWater = int.tryParse(controller.text) ?? targetWater;
+                  targetWater = newTarget;
                   if (currentWater > targetWater) {
                     currentWater = targetWater;
                   }
                 });
+                
+                // Update target in database
+                try {
+                  final userId = _supabase.auth.currentUser?.id;
+                  if (userId != null) {
+                    final today = DateTime.now().toIso8601String().split('T')[0];
+                    await _supabase
+                        .from('daily_activities')
+                        .update({'water_goal_ml': targetWater})
+                        .eq('user_id', userId)
+                        .eq('activity_date', today);
+                  }
+                } catch (e) {
+                  print('Error updating target: $e');
+                }
+                
                 Navigator.pop(context);
               },
               child: const Text('Set'),
@@ -78,6 +249,96 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
           ],
         );
       },
+    );
+  }
+
+  void showReminderSettingsDialog(String reminderId) {
+    final reminder = reminders[reminderId]!;
+    
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text('${reminder.label} Reminder Settings'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Time: ${reminder.time}',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Active Days:',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _buildDayChip('Mon', 1, reminder, setDialogState),
+                      _buildDayChip('Tue', 2, reminder, setDialogState),
+                      _buildDayChip('Wed', 3, reminder, setDialogState),
+                      _buildDayChip('Thu', 4, reminder, setDialogState),
+                      _buildDayChip('Fri', 5, reminder, setDialogState),
+                      _buildDayChip('Sat', 6, reminder, setDialogState),
+                      _buildDayChip('Sun', 0, reminder, setDialogState),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    setState(() {});
+                    _scheduleReminder(reminder);
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildDayChip(String label, int dayIndex, ReminderData reminder, StateSetter setDialogState) {
+    final isActive = reminder.activeDays.contains(dayIndex);
+    
+    return FilterChip(
+      label: Text(label),
+      selected: isActive,
+      onSelected: (selected) {
+        setDialogState(() {
+          if (selected) {
+            reminder.activeDays.add(dayIndex);
+          } else {
+            reminder.activeDays.remove(dayIndex);
+          }
+        });
+      },
+      selectedColor: const Color(0xFF5865A1),
+      checkmarkColor: Colors.white,
+      labelStyle: TextStyle(
+        color: isActive ? Colors.white : Colors.black87,
+        fontWeight: FontWeight.w600,
+      ),
     );
   }
 
@@ -109,14 +370,16 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                           shrinkWrap: true,
                           itemCount: customReminders.length,
                           itemBuilder: (context, index) {
+                            final reminder = customReminders[index];
                             return ListTile(
-                              title: Text(customReminders[index]['label']!),
-                              subtitle: Text(customReminders[index]['time']!),
+                              title: Text(reminder['label']),
+                              subtitle: Text(reminder['time']),
                               trailing: IconButton(
                                 icon: const Icon(Icons.delete, color: Colors.red),
-                                onPressed: () {
+                                onPressed: () async {
+                                  await _cancelReminder('custom_$index');
+                                  
                                   setDialogState(() {
-                                    selectedReminders.remove('custom_$index');
                                     customReminders.removeAt(index);
                                   });
                                   setState(() {});
@@ -134,12 +397,28 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                           initialTime: TimeOfDay.now(),
                         );
                         if (picked != null) {
+                          final customId = 'custom_${customReminders.length}';
+                          final timeString = picked.format(context);
+                          
                           setDialogState(() {
                             customReminders.add({
+                              'id': customId,
                               'label': 'Custom',
-                              'time': picked.format(context),
+                              'time': timeString,
+                              'hour': picked.hour,
+                              'minute': picked.minute,
                             });
                           });
+                          
+                          // Schedule the custom reminder
+                          await _notificationService.scheduleWaterReminder(
+                            id: customId.hashCode.abs(),
+                            title: 'Time to Drink Water! 💧',
+                            body: 'Stay hydrated! Drink ${quickAddAmount}ml of water now.',
+                            hour: picked.hour,
+                            minute: picked.minute,
+                          );
+                          
                           setState(() {});
                         }
                       },
@@ -162,10 +441,100 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
     );
   }
 
+  void showHistoryDialog() async {
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) return;
+
+      final response = await _supabase
+          .from('daily_activities')
+          .select('activity_date, water_intake_ml, water_goal_ml')
+          .eq('user_id', userId)
+          .gt('water_intake_ml', 0)
+          .order('activity_date', ascending: false)
+          .limit(30);
+
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Text('Water Intake History'),
+            content: SizedBox(
+              width: double.maxFinite,
+              height: 400,
+              child: response.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No history available',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: response.length,
+                      itemBuilder: (context, index) {
+                        final day = response[index];
+                        final date = DateTime.parse(day['activity_date']);
+                        final intake = day['water_intake_ml'];
+                        final goal = day['water_goal_ml'];
+                        final percentage = (intake / goal * 100).toInt();
+                        
+                        return Card(
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: percentage >= 100
+                                  ? Colors.green
+                                  : percentage >= 75
+                                      ? Colors.orange
+                                      : Colors.red,
+                              child: Text(
+                                '${percentage}%',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                            title: Text(
+                              '${date.day}/${date.month}/${date.year}',
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            subtitle: Text('${intake}ml / ${goal}ml'),
+                            trailing: Icon(
+                              percentage >= 100
+                                  ? Icons.check_circle
+                                  : Icons.water_drop,
+                              color: percentage >= 100
+                                  ? Colors.green
+                                  : const Color(0xFF5DC0F0),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+            ],
+          );
+        },
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading history: $e')),
+      );
+    }
+  }
+
   void resetProgress() {
     setState(() {
       currentWater = 0;
     });
+    _updateWaterIntake();
   }
 
   void _showAddDialog() {
@@ -274,6 +643,15 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
     final size = MediaQuery.of(context).size;
     final isSmallScreen = size.width < 360;
     
+    if (_isLoading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF0D2F5C),
+        body: Center(
+          child: CircularProgressIndicator(color: Colors.white),
+        ),
+      );
+    }
+    
     return Scaffold(
       backgroundColor: const Color(0xFF0D2F5C),
       appBar: AppBar(
@@ -290,6 +668,11 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
         centerTitle: true,
         actions: [
           IconButton(
+            icon: const Icon(Icons.history, color: Colors.white),
+            onPressed: showHistoryDialog,
+            tooltip: 'View History',
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: resetProgress,
             tooltip: 'Reset Progress',
@@ -305,15 +688,10 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
             ),
             child: Column(
               children: [
-                // Water Progress Circle
                 _buildWaterProgress(size, isSmallScreen),
                 SizedBox(height: size.height * 0.03),
-                
-                // Quick Add Section
                 _buildQuickAddSection(size, isSmallScreen),
                 SizedBox(height: size.height * 0.02),
-                
-                // Set Reminder Section
                 _buildReminderSection(isSmallScreen),
                 SizedBox(height: size.height * 0.1),
               ],
@@ -339,13 +717,13 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
               IconButton(
                 icon: const Icon(Icons.home, color: Colors.blue, size: 28),
                 onPressed: () {
-                  Navigator.push(context,
-                      MaterialPageRoute(
-                        builder: (_) => HomePage(),
-                      ),);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => HomePage()),
+                  );
                 },
               ),
-              const SizedBox(width: 40), // Space for FAB
+              const SizedBox(width: 40),
               IconButton(
                 icon: const Icon(Icons.bar_chart, color: Colors.white, size: 28),
                 onPressed: () {
@@ -369,20 +747,15 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
       alignment: Alignment.center,
       clipBehavior: Clip.none,
       children: [
-        // Background circle with border
         Container(
           width: circleSize,
           height: circleSize,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: Colors.white,
-            border: Border.all(
-              color: Colors.white,
-              width: 3,
-            ),
+            border: Border.all(color: Colors.white, width: 3),
           ),
         ),
-        // Progress circle (water fill)
         ClipOval(
           child: SizedBox(
             width: circleSize,
@@ -404,7 +777,6 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
             ),
           ),
         ),
-        // Text overlay
         Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -435,7 +807,6 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
             ),
           ],
         ),
-        // Set target button with bottle icon
         Positioned(
           right: -5,
           bottom: circleSize * 0.15,
@@ -505,7 +876,6 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Minus button - decrease amount by 50ml
               GestureDetector(
                 onTap: decreaseQuickAddAmount,
                 child: Container(
@@ -523,7 +893,6 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                 ),
               ),
               SizedBox(width: size.width * 0.04),
-              // Amount display - tappable to add water
               GestureDetector(
                 onTap: addWater,
                 child: Container(
@@ -546,7 +915,6 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                 ),
               ),
               SizedBox(width: size.width * 0.04),
-              // Plus button - increase amount by 50ml
               GestureDetector(
                 onTap: increaseQuickAddAmount,
                 child: Container(
@@ -571,15 +939,6 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
   }
 
   Widget _buildReminderSection(bool isSmallScreen) {
-    final reminders = [
-      {'id': 'morning_7', 'label': 'Morning', 'time': '7 am'},
-      {'id': 'noon_11', 'label': 'Noon', 'time': '11 am'},
-      {'id': 'afternoon_2', 'label': 'Afternoon', 'time': '2 pm'},
-      {'id': 'afternoon_4', 'label': 'Afternoon', 'time': '4 pm'},
-      {'id': 'evening_7', 'label': 'Evening', 'time': '7 pm'},
-      {'id': 'custom', 'label': 'Custom', 'time': ''},
-    ];
-
     return Container(
       width: double.infinity,
       padding: EdgeInsets.symmetric(
@@ -609,68 +968,134 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
             crossAxisSpacing: 10,
             mainAxisSpacing: 10,
             childAspectRatio: 1.3,
-            children: reminders.map((reminder) {
-              final isSelected = selectedReminders.contains(reminder['id']);
-              final isCustom = reminder['id'] == 'custom';
-              
-              return GestureDetector(
-                onTap: () {
-                  if (isCustom) {
-                    showCustomReminderDialog();
-                  } else {
+            children: [
+              ...reminders.entries.map((entry) {
+                final reminder = entry.value;
+                final isEnabled = reminder.isEnabled;
+                
+                return GestureDetector(
+                  onTap: () {
                     setState(() {
-                      if (selectedReminders.contains(reminder['id'])) {
-                        selectedReminders.remove(reminder['id']);
-                      } else {
-                        selectedReminders.add(reminder['id']!);
-                      }
+                      reminder.isEnabled = !reminder.isEnabled;
                     });
-                  }
-                },
+                    _scheduleReminder(reminder);
+                  },
+                  onLongPress: () {
+                    showReminderSettingsDialog(entry.key);
+                  },
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      border: isEnabled
+                          ? Border.all(color: const Color(0xFF5865A1), width: 2.5)
+                          : null,
+                    ),
+                    child: Stack(
+                      children: [
+                        Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                reminder.label,
+                                style: TextStyle(
+                                  color: const Color(0xFF0D2F5C),
+                                  fontSize: isSmallScreen ? 13 : 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                reminder.time,
+                                style: TextStyle(
+                                  color: const Color(0xFF6B6B9E),
+                                  fontSize: isSmallScreen ? 11 : 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (reminder.activeDays.length < 7)
+                          Positioned(
+                            top: 4,
+                            right: 4,
+                            child: Container(
+                              padding: const EdgeInsets.all(2),
+                              decoration: const BoxDecoration(
+                                color: Colors.orange,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.calendar_today,
+                                size: 10,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+              GestureDetector(
+                onTap: showCustomReminderDialog,
                 child: Container(
                   decoration: BoxDecoration(
-                    color: isCustom 
-                        ? const Color(0xFF5865A1)
-                        : Colors.white,
+                    color: const Color(0xFF5865A1),
                     borderRadius: BorderRadius.circular(20),
-                    border: isSelected && !isCustom
-                        ? Border.all(color: const Color(0xFF5865A1), width: 2.5)
-                        : null,
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
-                        reminder['label']!,
+                        'Custom',
                         style: TextStyle(
-                          color: isCustom
-                              ? Colors.white
-                              : const Color(0xFF0D2F5C),
+                          color: Colors.white,
                           fontSize: isSmallScreen ? 13 : 14,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      if (reminder['time']!.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          reminder['time']!,
-                          style: TextStyle(
-                            color: isCustom 
-                                ? Colors.white70
-                                : const Color(0xFF6B6B9E),
-                            fontSize: isSmallScreen ? 11 : 12,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
                     ],
                   ),
                 ),
-              );
-            }).toList(),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Center(
+            child: Text(
+              'Long press to set active days',
+              style: TextStyle(
+                color: const Color(0xFF6B6B9E),
+                fontSize: isSmallScreen ? 10 : 11,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
           ),
         ],
       ),
     );
   }
+}
+
+class ReminderData {
+  final String id;
+  final String label;
+  final String time;
+  final int hour;
+  final int minute;
+  bool isEnabled;
+  Set<int> activeDays; // 0=Sunday, 1=Monday, etc.
+
+  ReminderData({
+    required this.id,
+    required this.label,
+    required this.time,
+    required this.hour,
+    required this.minute,
+    required this.isEnabled,
+    required this.activeDays,
+  });
 }

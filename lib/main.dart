@@ -4,14 +4,28 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'intro_page.dart';
 import 'gender_page.dart';
 import 'home_page.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Load environment variables
+  await dotenv.load(fileName: ".env");
+  
+  // Get Supabase credentials from .env
+  final supabaseUrl = dotenv.env['SUPABASE_URL'];
+  final supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'];
+
+  // Validate credentials exist
+  if (supabaseUrl == null || supabaseAnonKey == null) {
+    throw Exception('Supabase credentials not found in .env file');
+  }
 
   // Initialize Supabase
   await Supabase.initialize(
-    url: 'https://mjijxsojtbshsauguwjf.supabase.co',
-    anonKey: 'sb_publishable_Ed9aAKGTLev20EWZmbmP7w_2mrQUCAM',
+    url: supabaseUrl,
+    anonKey: supabaseAnonKey,
   );
 
   runApp(const MyApp());

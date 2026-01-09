@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:developer';
 import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-// Keep your NutritionData class exactly as it is (no changes needed there)
+
 class NutritionData {
   final String foodName;
   final String servingSize;
@@ -32,14 +34,17 @@ class NutritionData {
 }
 
 class GeminiNutritionService {
-  // Your working API Key
-  static const String apiKey = 'AIzaSyAj1xbZrrIKQTAa_WCDvI1bWl-6HfQ3c30';
   late final GenerativeModel _model;
 
   GeminiNutritionService() {
-    
+    final apiKey = dotenv.env['GEMINI_API_KEY'];
+
+    if (apiKey == null || apiKey.isEmpty) {
+      throw Exception('GEMINI_API_KEY not found in .env');
+    }
+
     _model = GenerativeModel(
-      model: 'gemini-2.5-pro', 
+      model: 'gemini-2.5-flash',
       apiKey: apiKey,
     );
   }
@@ -47,15 +52,15 @@ class GeminiNutritionService {
   Future<NutritionData?> getNutritionInfo(String foodInput) async {
     try {
       final prompt = '''
- Analyze the following food item: "$foodInput"
+Analyze the following food item: "$foodInput"
 
-Return the data as a strictly valid JSON object. 
-Do not include markdown formatting, backticks, or any preamble. 
+Return the data as a strictly valid JSON object.
+Do not include markdown formatting, backticks, or any preamble.
 If the food is unknown, return null for the numeric values.
 
 {
   "food_name": "string",
-  "serving_size": "string (e.g., '100g' or '1 cup')",
+  "serving_size": "string",
   "calories": number,
   "protein_g": number,
   "carbs_g": number,
@@ -63,24 +68,24 @@ If the food is unknown, return null for the numeric values.
 }
 ''';
 
-      final content = [Content.text(prompt)];
-      final response = await _model.generateContent(content);
+      final response = await _model.generateContent(
+        [Content.text(prompt)],
+      );
 
       if (response.text == null) return null;
 
-      // Clean the response
-      String cleanJson = response.text!.replaceAll(RegExp(r'```json|```'), '').trim();
-      
-      // Extract just the JSON part { ... }
-      int start = cleanJson.indexOf('{');
-      int end = cleanJson.lastIndexOf('}');
-      if (start != -1 && end != -1) {
-        cleanJson = cleanJson.substring(start, end + 1);
-      }
+      String cleanJson =
+          response.text!.replaceAll(RegExp(r'```json|```'), '').trim();
+
+      final start = cleanJson.indexOf('{');
+      final end = cleanJson.lastIndexOf('}');
+      if (start == -1 || end == -1) return null;
+
+      cleanJson = cleanJson.substring(start, end + 1);
 
       return NutritionData.fromJson(json.decode(cleanJson));
     } catch (e) {
-      print('Gemini Error: $e');
+      log('Gemini Error', error: e);
       return null;
     }
   }
