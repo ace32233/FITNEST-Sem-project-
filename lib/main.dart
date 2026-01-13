@@ -5,9 +5,14 @@ import 'intro_page.dart';
 import 'gender_page.dart';
 import 'home_page.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/rendering.dart';
 
 
 void main() async {
+  debugPaintBaselinesEnabled = false;
+  debugPaintSizeEnabled = false;
+  debugPaintPointersEnabled = false;
+  debugRepaintRainbowEnabled = false;
   WidgetsFlutterBinding.ensureInitialized();
   
   // Load environment variables
