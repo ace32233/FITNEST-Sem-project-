@@ -58,13 +58,20 @@ class Exercise {
       return fallback;
     }
 
+    // FIX 1: Trim whitespace.
+    // FIX 2: Force HTTPS (Android blocks HTTP).
+    String rawGif = pickStr(['gifUrl', 'gif_url'], fallback: '').trim();
+    if (rawGif.startsWith('http://')) {
+      rawGif = rawGif.replaceFirst('http://', 'https://');
+    }
+
     return Exercise(
       id: pickStr(['id', 'uuid', 'exerciseId'], fallback: ''),
       name: pickStr(['name'], fallback: ''),
       bodyPart: pickStr(['bodyPart', 'body_part'], fallback: ''),
       target: pickStr(['target'], fallback: ''),
       equipment: pickStr(['equipment'], fallback: ''),
-      gifUrl: pickStr(['gifUrl', 'gif_url'], fallback: ''),
+      gifUrl: rawGif,
     );
   }
 
@@ -188,9 +195,9 @@ final selectedGroupProvider = StateProvider<MuscleGroup?>((ref) => null);
 /// ------------------------------
 Future<http.Response> _exerciseDbGet(Uri uri) async {
   final apiKey = dotenv.env['EXERCISE_API_KEY'] ?? '';
-  final host = dotenv.env['EXERCISE_API_HOST'] ?? ''; // exercisedb.p.rapidapi.com
+  final host = dotenv.env['EXERCISE_API_HOST'] ?? 'exercisedb.p.rapidapi.com';
 
-  if (apiKey.isEmpty || host.isEmpty) {
+  if (apiKey.isEmpty) {
     throw Exception('Exercise API credentials not found in .env');
   }
 
@@ -209,7 +216,7 @@ Future<http.Response> _exerciseDbGet(Uri uri) async {
 }
 
 Future<List<Exercise>> _fetchExercisesForBodyPart(String bodyPart) async {
-  final host = dotenv.env['EXERCISE_API_HOST'] ?? '';
+  final host = dotenv.env['EXERCISE_API_HOST'] ?? 'exercisedb.p.rapidapi.com';
   final uri = Uri.https(host, '/exercises/bodyPart/$bodyPart');
 
   final res = await _exerciseDbGet(uri);
@@ -386,17 +393,21 @@ class WorkoutState {
 class WorkoutController extends StateNotifier<WorkoutState> {
   WorkoutController(this._ref) : super(WorkoutState.empty());
   final Ref _ref;
+  bool _isSaving = false;
 
-  void reset() => state = WorkoutState.empty();
+  void reset() {
+    state = WorkoutState.empty();
+    _isSaving = false;
+  }
 
   void startFromSource(List<Exercise> source, {required MuscleGroup group}) {
     if (source.length < 3) {
       state = WorkoutState.empty();
       return;
     }
-
+    
     final maxLen = min(6, source.length);
-    final len = max(3, maxLen); // 3..6 (if list big => 6)
+    final len = max(3, maxLen);
     final picked = _pickUniqueRandom(source, len);
 
     state = WorkoutState(
@@ -406,9 +417,12 @@ class WorkoutController extends StateNotifier<WorkoutState> {
       startedAt: DateTime.now(),
       muscleGroup: group,
     );
+    _isSaving = false;
   }
 
   void completeCurrentAndNext() {
+    if (state.isFinished || _isSaving) return;
+
     final cur = state.current;
     if (cur == null) return;
 
@@ -443,6 +457,9 @@ class WorkoutController extends StateNotifier<WorkoutState> {
   }
 
   Future<void> _persistCompletion() async {
+    if (_isSaving) return;
+    _isSaving = true;
+
     final startedAt = state.startedAt ?? DateTime.now();
     final minutes = max(1, DateTime.now().difference(startedAt).inMinutes);
     final today = _todayDateKey();
@@ -491,8 +508,7 @@ class WorkoutController extends StateNotifier<WorkoutState> {
       }).eq('id', existingDay['id']);
     }
 
-    // B) Upsert workout_logs (stores exercises list!)
-    // Requires the workout_logs table I gave you.
+    // B) Upsert workout_logs
     final exercisesJson = state.workout.map((e) => e.toJson()).toList();
 
     final existingLog = await Supabase.instance.client
@@ -543,6 +559,8 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
     final exercisesAsync = ref.watch(exercisesForGroupProvider);
     final workout = ref.watch(workoutControllerProvider);
     final todayHistoryAsync = ref.watch(todayHistoryProvider);
+    
+    final bool alreadyDoneToday = todayHistoryAsync.valueOrNull?.completed ?? false;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F4FF),
@@ -692,10 +710,12 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
                     height: 54,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: workout.isFinished ? Colors.grey : const Color(0xFF6D4CFF),
+                        backgroundColor: (workout.isFinished || alreadyDoneToday) 
+                            ? Colors.grey 
+                            : const Color(0xFF6D4CFF),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       ),
-                      onPressed: workout.isFinished
+                      onPressed: (workout.isFinished || alreadyDoneToday)
                           ? null
                           : () {
                               if (!workout.hasWorkout) {
@@ -716,7 +736,9 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
                               );
                             },
                       child: Text(
-                        workout.hasWorkout ? 'Continue Workout' : 'Start Workout (3-6)',
+                        alreadyDoneToday 
+                            ? 'Come back tomorrow!'
+                            : (workout.hasWorkout ? 'Continue Workout' : 'Start Workout (3-6)'),
                         style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
                       ),
                     ),
@@ -809,6 +831,15 @@ class _WorkoutStepView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // FIX 3: Add API headers to image request
+    final apiKey = dotenv.env['EXERCISE_API_KEY'] ?? '';
+    final apiHost = dotenv.env['EXERCISE_API_HOST'] ?? '';
+    
+    // Safety check for empty keys
+    final Map<String, String>? headers = (apiKey.isNotEmpty && apiHost.isNotEmpty) 
+        ? {'X-RapidAPI-Key': apiKey, 'X-RapidAPI-Host': apiHost}
+        : null;
+
     return Column(
       children: [
         Container(
@@ -834,7 +865,7 @@ class _WorkoutStepView extends StatelessWidget {
                 borderRadius: BorderRadius.circular(14),
                 child: AspectRatio(
                   aspectRatio: 16 / 10,
-                  child: _ExerciseGif(url: exercise.gifUrl),
+                  child: _ExerciseGif(url: exercise.gifUrl, headers: headers),
                 ),
               ),
               const SizedBox(height: 12),
@@ -912,16 +943,23 @@ class _WorkoutStepView extends StatelessWidget {
 
 class _ExerciseGif extends StatelessWidget {
   final String url;
-  const _ExerciseGif({required this.url});
+  final Map<String, String>? headers;
+  
+  const _ExerciseGif({required this.url, this.headers});
 
   @override
   Widget build(BuildContext context) {
     if (url.trim().isEmpty) {
-      return Container(color: Colors.black12, alignment: Alignment.center, child: const Text('No GIF'));
+      return Container(
+        color: Colors.black12, 
+        alignment: Alignment.center, 
+        child: const Text('No Preview', style: TextStyle(color: Colors.black45)),
+      );
     }
 
     return Image.network(
       url,
+      headers: headers, // Pass auth headers here
       fit: BoxFit.cover,
       filterQuality: FilterQuality.medium,
       loadingBuilder: (c, child, progress) {
@@ -932,16 +970,26 @@ class _ExerciseGif extends StatelessWidget {
           child: const CircularProgressIndicator(),
         );
       },
-      errorBuilder: (_, __, ___) => Container(
-        color: Colors.black12,
-        alignment: Alignment.center,
-        padding: const EdgeInsets.all(12),
-        child: const Text(
-          'GIF failed to load.\nCheck INTERNET permission.',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-      ),
+      errorBuilder: (_, error, stackTrace) {
+        debugPrint('[IMAGE ERROR] Failed to load: $url\nError: $error');
+        return Container(
+          color: Colors.black12,
+          alignment: Alignment.center,
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.broken_image, color: Colors.black38, size: 32),
+              const SizedBox(height: 4),
+              const Text(
+                'No Preview',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black45),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -1020,6 +1068,14 @@ class _ExerciseCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // FIX 3: Also add headers to the list view thumbnail
+    final apiKey = dotenv.env['EXERCISE_API_KEY'] ?? '';
+    final apiHost = dotenv.env['EXERCISE_API_HOST'] ?? '';
+    
+    final Map<String, String>? headers = (apiKey.isNotEmpty && apiHost.isNotEmpty) 
+        ? {'X-RapidAPI-Key': apiKey, 'X-RapidAPI-Host': apiHost}
+        : null;
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -1038,8 +1094,20 @@ class _ExerciseCard extends StatelessWidget {
               height: 90,
               color: const Color(0xFFF1ECFF),
               child: ex.gifUrl.isEmpty
-                  ? const Icon(Icons.image_not_supported)
-                  : Image.network(ex.gifUrl, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image)),
+                  ? const Center(child: Icon(Icons.image_not_supported, color: Colors.black26))
+                  : Image.network(
+                      ex.gifUrl,
+                      headers: headers, // Pass auth headers
+                      fit: BoxFit.cover,
+                      loadingBuilder: (context, child, loadingProgress) {
+                        if (loadingProgress == null) return child;
+                        return const Center(child: Icon(Icons.image, color: Colors.black12));
+                      },
+                      errorBuilder: (_, error, stackTrace) {
+                        debugPrint('[LIST IMAGE ERROR] ${ex.name}: ${ex.gifUrl}');
+                        return const Center(child: Icon(Icons.broken_image, color: Colors.black26));
+                      },
+                    ),
             ),
           ),
           const SizedBox(width: 12),
