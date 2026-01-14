@@ -1142,7 +1142,7 @@ Widget _buildQuickAddSection(Size size, bool isSmallScreen) {
   }
 }
 
-// Logic classes remain exactly the same
+// Logic classes remain exactly the same...
 class ReminderData {
   final String id;
   final String label;
