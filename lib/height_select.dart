@@ -20,33 +20,46 @@ class HeightSelectionScreen extends StatefulWidget {
 }
 
 class _HeightSelectionScreenState extends State<HeightSelectionScreen> {
-  final FixedExtentScrollController _feetController =
-      FixedExtentScrollController(initialItem: 2); // Start at 5 ft
-  final FixedExtentScrollController _inchesController =
-      FixedExtentScrollController(initialItem: 9); // Start at 10 in
+  // Use ValueNotifiers to isolate state updates to specific widgets
+  // preventing the entire screen from rebuilding during scrolling.
+  late final ValueNotifier<int> _feetNotifier;
+  late final ValueNotifier<int> _inchesNotifier;
+  final ValueNotifier<bool> _isLoadingNotifier = ValueNotifier(false);
 
-  int _selectedFeet = 5;
-  int _selectedInches = 10;
-  bool _isLoading = false;
+  late final FixedExtentScrollController _feetController;
+  late final FixedExtentScrollController _inchesController;
 
   final supabase = Supabase.instance.client;
+
+  // Constants for initial values
+  static const int _initialFeetIndex = 2; // 5 ft (2 + 3)
+  static const int _initialInchesIndex = 9; // 10 in (9 + 1)
+  static const int _feetBaseOffset = 3; // Starts at 3 ft
+  static const int _inchesBaseOffset = 1; // Starts at 1 in
 
   @override
   void initState() {
     super.initState();
-    _selectedFeet = _feetController.initialItem + 3;
-    _selectedInches = _inchesController.initialItem + 1;
+    _feetController = FixedExtentScrollController(initialItem: _initialFeetIndex);
+    _inchesController = FixedExtentScrollController(initialItem: _initialInchesIndex);
+
+    // Initialize notifiers with calculated starting values
+    _feetNotifier = ValueNotifier<int>(_initialFeetIndex + _feetBaseOffset);
+    _inchesNotifier = ValueNotifier<int>(_initialInchesIndex + _inchesBaseOffset);
   }
 
   @override
   void dispose() {
     _feetController.dispose();
     _inchesController.dispose();
+    _feetNotifier.dispose();
+    _inchesNotifier.dispose();
+    _isLoadingNotifier.dispose();
     super.dispose();
   }
 
   Future<void> _saveDataAndNavigate() async {
-    setState(() => _isLoading = true);
+    _isLoadingNotifier.value = true;
 
     try {
       final user = supabase.auth.currentUser;
@@ -55,20 +68,18 @@ class _HeightSelectionScreenState extends State<HeightSelectionScreen> {
         return;
       }
 
-      // Save fitness data to Supabase
       await supabase.from('user_fitness').upsert({
         'id': user.id,
         'gender': widget.selectedGender,
         'age': widget.selectedAge,
         'weight_kg': widget.selectedWeight,
-        'height_ft': _selectedFeet,
-        'height_in': _selectedInches,
+        'height_ft': _feetNotifier.value,
+        'height_in': _inchesNotifier.value,
         'updated_at': DateTime.now().toIso8601String(),
       });
 
       if (!mounted) return;
 
-      // Navigate to home page
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (_) => const HomePage()),
@@ -78,7 +89,7 @@ class _HeightSelectionScreenState extends State<HeightSelectionScreen> {
       _showError('Failed to save data: $e');
     } finally {
       if (mounted) {
-        setState(() => _isLoading = false);
+        _isLoadingNotifier.value = false;
       }
     }
   }
@@ -94,274 +105,96 @@ class _HeightSelectionScreenState extends State<HeightSelectionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final width = size.width;
-    final height = size.height;
+    // Instantiate layout helper once per build
+    final layout = _Layout(MediaQuery.sizeOf(context));
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A2852),
       body: Stack(
         children: [
-          // BACKGROUND WITH WAVE
+          // 1. Static Background: Extracted to const widget to prevent repainting
           const Positioned.fill(
-            child: CustomPaint(
-              painter: WavePainter(),
-            ),
+            child: _WaveBackground(),
           ),
 
-          // FOREGROUND CONTENT
           SafeArea(
             child: Column(
               children: [
-                SizedBox(height: height * 0.005),
+                SizedBox(height: layout.topSpacing),
 
-                // Back Arrow
-                Padding(
-                  padding: EdgeInsets.only(left: width * 0.034),
-                  child: Align(
-                    alignment: Alignment.topLeft,
-                    child: IconButton(
-                      icon: Icon(Icons.arrow_back_rounded, size: width * 0.115),
-                      color: Colors.white,
-                      onPressed: () => Navigator.maybePop(context),
-                    ),
-                  ),
-                ),
+                // 2. Header Section
+                _Header(layout: layout),
 
-                SizedBox(height: height * 0.008),
+                SizedBox(height: layout.headerBottomSpacing),
 
-                // Title
-                Text(
-                  'What is your Height?',
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontSize: width * 0.063,
-                    fontWeight: FontWeight.w700,
-                    fontStyle: FontStyle.normal,
-                    letterSpacing: 2,
-                  ),
-                ),
-                SizedBox(height: height * 0.007),
-
-                Text(
-                  'This helps us create your',
-                  style: GoogleFonts.poppins(
-                    fontSize: width * 0.037,
-                    fontWeight: FontWeight.w400,
-                    fontStyle: FontStyle.italic,
-                    color: Colors.white70,
-                    letterSpacing: 1.3,
-                  ),
-                ),
-                Text(
-                  'personalized plans',
-                  style: GoogleFonts.poppins(
-                    fontSize: width * 0.037,
-                    fontWeight: FontWeight.w400,
-                    fontStyle: FontStyle.italic,
-                    color: Colors.white70,
-                    letterSpacing: 1.3,
-                  ),
-                ),
-                SizedBox(height: height * 0.119),
-
-                // DUAL WHEEL AREA
+                // 3. Wheel Section: Contains both wheels
                 SizedBox(
-                  height: height * 0.348,
+                  height: layout.wheelContainerHeight,
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // FEET WHEEL
-                      SizedBox(
-                        width: width * 0.388,
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            ListWheelScrollView.useDelegate(
-                              controller: _feetController,
-                              physics: const FixedExtentScrollPhysics(),
-                              itemExtent: height * 0.076,
-                              perspective: 0.002,
-                              onSelectedItemChanged: (index) {
-                                setState(() {
-                                  _selectedFeet = index + 3;
-                                });
-                              },
-                              childDelegate: ListWheelChildBuilderDelegate(
-                                childCount: 5, // 3-7 ft
-                                builder: (context, idx) {
-                                  final feet = idx + 3;
-                                  final bool isCenter = feet == _selectedFeet;
-                                  final diff = (feet - _selectedFeet).abs();
-
-                                  final double fontSize =
-                                      isCenter ? width * 0.097 : (diff == 1 ? width * 0.081 : width * 0.068);
-
-                                  final double opacity =
-                                      isCenter ? 1.0 : (diff == 1 ? 0.9 : 0.8);
-
-                                  return Center(
-                                    child: Text(
-                                      '$feet ft',
-                                      style: GoogleFonts.poppins(
-                                        fontSize: fontSize,
-                                        fontWeight: isCenter
-                                            ? FontWeight.w700
-                                            : FontWeight.w400,
-                                        color: Colors.white.withOpacity(opacity),
-                                        letterSpacing: 2.5,
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-
-                            // top line
-                            Positioned(
-                              top: height * 0.135,
-                              child: Container(
-                                width: width * 0.315,
-                                height: height * 0.005,
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(3),
-                                ),
-                              ),
-                            ),
-
-                            // bottom line
-                            Positioned(
-                              top: height * 0.207,
-                              child: Container(
-                                width: width * 0.315,
-                                height: height * 0.005,
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(3),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                      _HeightWheel(
+                        controller: _feetController,
+                        notifier: _feetNotifier,
+                        itemCount: 5,
+                        baseOffset: _feetBaseOffset,
+                        labelSuffix: 'ft',
+                        layout: layout,
                       ),
-
-                      SizedBox(width: width * 0.097),
-
-                      // INCHES WHEEL
-                      SizedBox(
-                        width: width * 0.388,
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            ListWheelScrollView.useDelegate(
-                              controller: _inchesController,
-                              physics: const FixedExtentScrollPhysics(),
-                              itemExtent: height * 0.076,
-                              perspective: 0.002,
-                              onSelectedItemChanged: (index) {
-                                setState(() {
-                                  _selectedInches = index + 1;
-                                });
-                              },
-                              childDelegate: ListWheelChildBuilderDelegate(
-                                childCount: 11, // 1-11 inches
-                                builder: (context, idx) {
-                                  final inches = idx + 1;
-                                  final bool isCenter = inches == _selectedInches;
-                                  final diff = (inches - _selectedInches).abs();
-
-                                  final double fontSize =
-                                      isCenter ? width * 0.097 : (diff == 1 ? width * 0.081 : width * 0.068);
-
-                                  final double opacity =
-                                      isCenter ? 1.0 : (diff == 1 ? 0.9 : 0.8);
-
-                                  return Center(
-                                    child: Text(
-                                      '$inches in',
-                                      style: GoogleFonts.poppins(
-                                        fontSize: fontSize,
-                                        fontWeight: isCenter
-                                            ? FontWeight.w700
-                                            : FontWeight.w400,
-                                        color: Colors.white.withOpacity(opacity),
-                                        letterSpacing: 2.5,
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-
-                            // top line
-                            Positioned(
-                              top: height * 0.135,
-                              child: Container(
-                                width: width * 0.315,
-                                height: height * 0.005,
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(3),
-                                ),
-                              ),
-                            ),
-
-                            // bottom line
-                            Positioned(
-                              top: height * 0.207,
-                              child: Container(
-                                width: width * 0.315,
-                                height: height * 0.005,
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(3),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                      SizedBox(width: layout.wheelGap),
+                      _HeightWheel(
+                        controller: _inchesController,
+                        notifier: _inchesNotifier,
+                        itemCount: 11,
+                        baseOffset: _inchesBaseOffset,
+                        labelSuffix: 'in',
+                        layout: layout,
                       ),
                     ],
                   ),
                 ),
 
-                SizedBox(height: height * 0.140),
+                SizedBox(height: layout.footerSpacing),
 
-                // BUTTON
+                // 4. Confirm Button
                 Center(
                   child: SizedBox(
-                    width: width * 0.436,
-                    height: height * 0.050,
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _saveDataAndNavigate,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        disabledBackgroundColor: Colors.white70,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(40),
-                        ),
-                        elevation: 3,
-                      ),
-                      child: _isLoading
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(Colors.black),
-                              ),
-                            )
-                          : Text(
-                              'Confirm',
-                              style: GoogleFonts.poppins(
-                                fontSize: width * 0.052,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.black,
-                                letterSpacing: 2,
-                              ),
+                    width: layout.buttonWidth,
+                    height: layout.buttonHeight,
+                    child: ValueListenableBuilder<bool>(
+                      valueListenable: _isLoadingNotifier,
+                      builder: (context, isLoading, child) {
+                        return ElevatedButton(
+                          onPressed: isLoading ? null : _saveDataAndNavigate,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            disabledBackgroundColor: Colors.white70,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(40),
                             ),
+                            elevation: 3,
+                          ),
+                          child: isLoading
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                        Colors.black),
+                                  ),
+                                )
+                              : Text(
+                                  'Confirm',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: layout.buttonFontSize,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.black,
+                                    letterSpacing: 2,
+                                  ),
+                                ),
+                        );
+                      },
                     ),
                   ),
                 ),
@@ -374,41 +207,278 @@ class _HeightSelectionScreenState extends State<HeightSelectionScreen> {
   }
 }
 
+// --- Reusable Components ---
+
+class _HeightWheel extends StatelessWidget {
+  final FixedExtentScrollController controller;
+  final ValueNotifier<int> notifier;
+  final int itemCount;
+  final int baseOffset;
+  final String labelSuffix;
+  final _Layout layout;
+
+  const _HeightWheel({
+    required this.controller,
+    required this.notifier,
+    required this.itemCount,
+    required this.baseOffset,
+    required this.labelSuffix,
+    required this.layout,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: layout.wheelWidth,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // The Scroll View wrapped in ValueListenableBuilder
+          // Only this wheel rebuilds when its selection changes
+          ValueListenableBuilder<int>(
+            valueListenable: notifier,
+            builder: (context, selectedValue, _) {
+              return ListWheelScrollView.useDelegate(
+                controller: controller,
+                physics: const FixedExtentScrollPhysics(),
+                itemExtent: layout.itemExtent,
+                perspective: 0.002,
+                onSelectedItemChanged: (index) {
+                  notifier.value = index + baseOffset;
+                },
+                childDelegate: ListWheelChildBuilderDelegate(
+                  childCount: itemCount,
+                  builder: (context, idx) {
+                    final value = idx + baseOffset;
+                    final bool isCenter = value == selectedValue;
+                    final diff = (value - selectedValue).abs();
+
+                    // Font size calculation extracted from original logic
+                    final double fontSize = isCenter
+                        ? layout.fontSelected
+                        : (diff == 1
+                            ? layout.fontNeighbor
+                            : layout.fontFar);
+
+                    final double opacity =
+                        isCenter ? 1.0 : (diff == 1 ? 0.9 : 0.8);
+
+                    return Center(
+                      child: Text(
+                        '$value $labelSuffix',
+                        style: GoogleFonts.poppins(
+                          fontSize: fontSize,
+                          fontWeight:
+                              isCenter ? FontWeight.w700 : FontWeight.w400,
+                          color: Colors.white.withOpacity(opacity),
+                          letterSpacing: 2.5,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+
+          // Static selection lines
+          Positioned(
+            top: layout.lineTop1,
+            child: _SelectionLine(layout: layout),
+          ),
+          Positioned(
+            top: layout.lineTop2,
+            child: _SelectionLine(layout: layout),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SelectionLine extends StatelessWidget {
+  final _Layout layout;
+
+  const _SelectionLine({required this.layout});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: layout.lineWidth,
+      height: layout.lineHeight,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(3),
+      ),
+    );
+  }
+}
+
+class _Header extends StatelessWidget {
+  final _Layout layout;
+
+  const _Header({required this.layout});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Padding(
+          padding: EdgeInsets.only(left: layout.backButtonPadding),
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: IconButton(
+              icon: Icon(Icons.arrow_back_rounded, size: layout.iconSize),
+              color: Colors.white,
+              onPressed: () => Navigator.maybePop(context),
+            ),
+          ),
+        ),
+        SizedBox(height: layout.titleTopSpacing),
+        Text(
+          'What is your Height?',
+          style: GoogleFonts.poppins(
+            color: Colors.white,
+            fontSize: layout.titleFontSize,
+            fontWeight: FontWeight.w700,
+            fontStyle: FontStyle.normal,
+            letterSpacing: 2,
+          ),
+        ),
+        SizedBox(height: layout.subtitleSpacing),
+        Text(
+          'This helps us create your',
+          style: GoogleFonts.poppins(
+            fontSize: layout.subtitleFontSize,
+            fontWeight: FontWeight.w400,
+            fontStyle: FontStyle.italic,
+            color: Colors.white70,
+            letterSpacing: 1.3,
+          ),
+        ),
+        Text(
+          'personalized plans',
+          style: GoogleFonts.poppins(
+            fontSize: layout.subtitleFontSize,
+            fontWeight: FontWeight.w400,
+            fontStyle: FontStyle.italic,
+            color: Colors.white70,
+            letterSpacing: 1.3,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _WaveBackground extends StatelessWidget {
+  const _WaveBackground();
+
+  @override
+  Widget build(BuildContext context) {
+    return const CustomPaint(painter: WavePainter());
+  }
+}
+
 class WavePainter extends CustomPainter {
   const WavePainter();
 
+  // Cache paint object to avoid allocation on every frame
+  static final Paint _paint = Paint()
+    ..color = Colors.white
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1.5;
+
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-
     final path = Path();
-    
     final startY = size.height * 0.59;
     path.moveTo(0, startY);
-    
+
     path.cubicTo(
-      size.width * 0.10, size.height * 0.70,
-      size.width * 0.25, size.height * 0.71,
-      size.width * 0.35, size.height * 0.695,
-    );
-    
-    path.cubicTo(
-      size.width * 0.45, size.height * 0.68,
-      size.width * 0.75, size.height * 0.60,
-      size.width * 0.89, size.height * 0.664,
-    );
-    
-    path.quadraticBezierTo(
-      size.width * 0.90, size.height * 0.6662,
-      size.width, size.height * 0.715,
+      size.width * 0.10,
+      size.height * 0.70,
+      size.width * 0.25,
+      size.height * 0.71,
+      size.width * 0.35,
+      size.height * 0.695,
     );
 
-    canvas.drawPath(path, paint);
+    path.cubicTo(
+      size.width * 0.45,
+      size.height * 0.68,
+      size.width * 0.75,
+      size.height * 0.60,
+      size.width * 0.89,
+      size.height * 0.664,
+    );
+
+    path.quadraticBezierTo(
+      size.width * 0.90,
+      size.height * 0.6662,
+      size.width,
+      size.height * 0.715,
+    );
+
+    canvas.drawPath(path, _paint);
   }
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// --- Logic & Math ---
+
+/// Helper class to extract and pre-calculate responsive dimensions.
+/// Removes "magic numbers" from the widget tree.
+class _Layout {
+  final double topSpacing;
+  final double backButtonPadding;
+  final double iconSize;
+  final double titleTopSpacing;
+  final double titleFontSize;
+  final double subtitleSpacing;
+  final double subtitleFontSize;
+  final double headerBottomSpacing;
+  final double wheelContainerHeight;
+  final double wheelWidth;
+  final double wheelGap;
+  final double itemExtent;
+  final double fontSelected;
+  final double fontNeighbor;
+  final double fontFar;
+  final double lineWidth;
+  final double lineHeight;
+  final double lineTop1;
+  final double lineTop2;
+  final double footerSpacing;
+  final double buttonWidth;
+  final double buttonHeight;
+  final double buttonFontSize;
+
+  _Layout(Size size)
+      : topSpacing = size.height * 0.005,
+        backButtonPadding = size.width * 0.034,
+        iconSize = size.width * 0.115,
+        titleTopSpacing = size.height * 0.008,
+        titleFontSize = size.width * 0.063,
+        subtitleSpacing = size.height * 0.007,
+        subtitleFontSize = size.width * 0.037,
+        headerBottomSpacing = size.height * 0.119,
+        wheelContainerHeight = size.height * 0.348,
+        wheelWidth = size.width * 0.388,
+        wheelGap = size.width * 0.097,
+        itemExtent = size.height * 0.076,
+        fontSelected = size.width * 0.097,
+        fontNeighbor = size.width * 0.081,
+        fontFar = size.width * 0.068,
+        lineWidth = size.width * 0.315,
+        lineHeight = size.height * 0.005,
+        // Calculate line positions relative to container
+        lineTop1 = size.height * 0.135,
+        lineTop2 = size.height * 0.207,
+        footerSpacing = size.height * 0.140,
+        buttonWidth = size.width * 0.436,
+        buttonHeight = size.height * 0.050,
+        buttonFontSize = size.width * 0.052;
 }

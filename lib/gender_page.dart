@@ -10,132 +10,127 @@ class GenderScreen extends StatefulWidget {
 }
 
 class _GenderScreenState extends State<GenderScreen> {
-  String? _selectedGender;
+  // Optimization: Use ValueNotifier to isolate state changes.
+  // This prevents the entire Scaffold (background, titles) from rebuilding on tap.
+  final ValueNotifier<String?> _selectedGenderNotifier = ValueNotifier(null);
 
-  static const _bgColor = Color(0xFF0A2852);
+  @override
+  void dispose() {
+    _selectedGenderNotifier.dispose();
+    super.dispose();
+  }
+
+  void _onGenderSelected(String gender) {
+    _selectedGenderNotifier.value = gender;
+  }
+
+  void _handleNext(BuildContext context) {
+    final gender = _selectedGenderNotifier.value;
+    if (gender != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AgeSelectionScreen(selectedGender: gender),
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
+    // Encapsulate responsive logic to clean up the build method and avoid repetitive calculations.
+    final layout = _Layout(MediaQuery.sizeOf(context));
 
     return Scaffold(
-      backgroundColor: _bgColor,
+      backgroundColor: const Color(0xFF0A2852),
       body: Stack(
         children: [
-          // WAVE BACKGROUND
+          // 1. Static Background: Never rebuilds
           const Positioned.fill(
             child: CustomPaint(
               painter: WavePainter(),
             ),
           ),
 
-          // MAIN CONTENT
           SafeArea(
             child: SizedBox(
               width: double.infinity,
               child: Column(
                 children: [
-                  SizedBox(height: screenHeight * 0.065),
+                  SizedBox(height: layout.topPadding),
 
-                  // TITLE
-                  Text(
-                    'Tell us About Yourself',
-                    style: GoogleFonts.poppins(
-                      fontSize: screenWidth * 0.067,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                      letterSpacing: screenWidth * 0.004,
-                    ),
-                  ),
+                  // 2. Extracted Static Header
+                  _HeaderSection(layout: layout),
 
-                  SizedBox(height: screenHeight * 0.008),
+                  SizedBox(height: layout.spacingAfterHeader),
 
-                  Text(
-                    'To give you a better experience',
-                    style: GoogleFonts.poppins(
-                      fontSize: screenWidth * 0.038,
-                      fontWeight: FontWeight.w400,
-                      color: Colors.white70,
-                      letterSpacing: screenWidth * 0.0033,
-                    ),
-                  ),
-
-                  SizedBox(height: screenHeight * 0.08),
-                  
-                  // GENDER OPTIONS
+                  // 3. Dynamic Section: Gender Options
+                  // Uses ValueListenableBuilder to only rebuild the buttons when selection changes
                   Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      children: [
-                        _GenderOption(
-                          label: 'Male',
-                          icon: Icons.male,
-                          value: 'male',
-                          isSelected: _selectedGender == 'male',
-                          onTap: () => setState(() => _selectedGender = 'male'),
-                          size: screenWidth * 0.44,
-                          iconSize: screenWidth * 0.28,
-                          fontSize: screenWidth * 0.05,
-                          letterSpacing: screenWidth * 0.0038,
-                          borderWidth: screenWidth * 0.01,
-                        ),
-
-                        SizedBox(height: screenHeight * 0.09),
-
-                        _GenderOption(
-                          label: 'Female',
-                          icon: Icons.female,
-                          value: 'female',
-                          isSelected: _selectedGender == 'female',
-                          onTap: () => setState(() => _selectedGender = 'female'),
-                          size: screenWidth * 0.44,
-                          iconSize: screenWidth * 0.28,
-                          fontSize: screenWidth * 0.05,
-                          letterSpacing: screenWidth * 0.0038,
-                          borderWidth: screenWidth * 0.01,
-                        ),
-                      ],
+                    child: ValueListenableBuilder<String?>(
+                      valueListenable: _selectedGenderNotifier,
+                      builder: (context, selectedGender, _) {
+                        return Column(
+                          mainAxisAlignment: MainAxisAlignment.start,
+                          children: [
+                            _GenderOption(
+                              label: 'Male',
+                              icon: Icons.male,
+                              value: 'male',
+                              isSelected: selectedGender == 'male',
+                              onTap: () => _onGenderSelected('male'),
+                              layout: layout,
+                            ),
+                            SizedBox(height: layout.spacingBetweenOptions),
+                            _GenderOption(
+                              label: 'Female',
+                              icon: Icons.female,
+                              value: 'female',
+                              isSelected: selectedGender == 'female',
+                              onTap: () => _onGenderSelected('female'),
+                              layout: layout,
+                            ),
+                          ],
+                        );
+                      },
                     ),
                   ),
 
-                  // NEXT BUTTON
+                  // 4. Dynamic Section: Next Button
+                  // Separate listener ensures we only rebuild the button's enabled state
                   Padding(
-                    padding: EdgeInsets.only(bottom: screenHeight * 0.11),
-                    child: SizedBox(
-                      width: screenWidth * 0.41,
-                      height: screenHeight * 0.053,
-                      child: ElevatedButton(
-                        onPressed: _selectedGender == null
-                            ? null
-                            : () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => AgeSelectionScreen(
-                                      selectedGender: _selectedGender!,
-                                    ),
-                                  ),
-                                );
-                              },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          disabledBackgroundColor: Colors.white70,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(screenWidth * 0.1),
+                    padding: EdgeInsets.only(bottom: layout.bottomPadding),
+                    child: ValueListenableBuilder<String?>(
+                      valueListenable: _selectedGenderNotifier,
+                      builder: (context, selectedGender, _) {
+                        return SizedBox(
+                          width: layout.buttonWidth,
+                          height: layout.buttonHeight,
+                          child: ElevatedButton(
+                            onPressed: selectedGender == null
+                                ? null
+                                : () => _handleNext(context),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              disabledBackgroundColor: Colors.white70,
+                              shape: RoundedRectangleBorder(
+                                borderRadius:
+                                    BorderRadius.circular(layout.buttonRadius),
+                              ),
+                              elevation: 3,
+                            ),
+                            child: Text(
+                              'Next',
+                              style: GoogleFonts.poppins(
+                                fontSize: layout.buttonFontSize,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: layout.buttonLetterSpacing,
+                                color: Colors.black,
+                              ),
+                            ),
                           ),
-                          elevation: 3,
-                        ),
-                        child: Text(
-                          'Next',
-                          style: GoogleFonts.poppins(
-                            fontSize: screenWidth * 0.056,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: screenWidth * 0.0051,
-                            color: Colors.black,
-                          ),
-                        ),
-                      ),
+                        );
+                      },
                     ),
                   ),
                 ],
@@ -148,18 +143,48 @@ class _GenderScreenState extends State<GenderScreen> {
   }
 }
 
-// Extracted as a separate stateless widget for better performance
+// --- Sub-Widgets & Helpers ---
+
+class _HeaderSection extends StatelessWidget {
+  final _Layout layout;
+
+  const _HeaderSection({required this.layout});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(
+          'Tell us About Yourself',
+          style: GoogleFonts.poppins(
+            fontSize: layout.titleFontSize,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+            letterSpacing: layout.titleLetterSpacing,
+          ),
+        ),
+        SizedBox(height: layout.titleSubtitleGap),
+        Text(
+          'To give you a better experience',
+          style: GoogleFonts.poppins(
+            fontSize: layout.subtitleFontSize,
+            fontWeight: FontWeight.w400,
+            color: Colors.white70,
+            letterSpacing: layout.subtitleLetterSpacing,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _GenderOption extends StatelessWidget {
   final String label;
   final IconData icon;
   final String value;
   final bool isSelected;
   final VoidCallback onTap;
-  final double size;
-  final double iconSize;
-  final double fontSize;
-  final double letterSpacing;
-  final double borderWidth;
+  final _Layout layout;
 
   const _GenderOption({
     required this.label,
@@ -167,11 +192,7 @@ class _GenderOption extends StatelessWidget {
     required this.value,
     required this.isSelected,
     required this.onTap,
-    required this.size,
-    required this.iconSize,
-    required this.fontSize,
-    required this.letterSpacing,
-    required this.borderWidth,
+    required this.layout,
   });
 
   @override
@@ -180,13 +201,14 @@ class _GenderOption extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        height: size,
-        width: size,
+        height: layout.optionSize,
+        width: layout.optionSize,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: Colors.white,
           border: isSelected
-              ? Border.all(color: Colors.amberAccent, width: borderWidth)
+              ? Border.all(
+                  color: Colors.amberAccent, width: layout.optionBorderWidth)
               : null,
         ),
         child: Column(
@@ -194,18 +216,19 @@ class _GenderOption extends StatelessWidget {
           children: [
             Icon(
               icon,
-              size: iconSize,
+              size: layout.iconSize,
               weight: 100,
               color: Colors.black,
             ),
-            SizedBox(height: size * 0.00001),
+            // Tiny vertical adjustment kept from original logic
+            SizedBox(height: layout.optionSize * 0.00001),
             Text(
               label,
               style: GoogleFonts.poppins(
                 color: Colors.black,
-                fontSize: fontSize,
+                fontSize: layout.optionFontSize,
                 fontWeight: FontWeight.w500,
-                letterSpacing: letterSpacing,
+                letterSpacing: layout.optionLetterSpacing,
               ),
             ),
           ],
@@ -218,42 +241,94 @@ class _GenderOption extends StatelessWidget {
 class WavePainter extends CustomPainter {
   const WavePainter();
 
+  // Optimization: Cache the Paint object to avoid recreating it every frame.
+  static final Paint _paint = Paint()
+    ..color = Colors.white
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1.5;
+
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-
     final path = Path();
-    
-    // Starting point (left side)
+
     final startY = size.height * 0.59;
     path.moveTo(0, startY);
-    
-    // First curve - smooth transition to the valley
+
     path.cubicTo(
-      size.width * 0.10, size.height * 0.70,
-      size.width * 0.25, size.height * 0.71,
-      size.width * 0.35, size.height * 0.695,
-    );
-    
-    // Second curve - gentle rise to the peak
-    path.cubicTo(
-      size.width * 0.45, size.height * 0.68,
-      size.width * 0.75, size.height * 0.60,
-      size.width * 0.89, size.height * 0.664,
-    );
-    
-    // Final segment to right edge
-    path.quadraticBezierTo(
-      size.width * 0.90, size.height * 0.6662,
-      size.width, size.height * 0.715,
+      size.width * 0.10,
+      size.height * 0.70,
+      size.width * 0.25,
+      size.height * 0.71,
+      size.width * 0.35,
+      size.height * 0.695,
     );
 
-    canvas.drawPath(path, paint);
+    path.cubicTo(
+      size.width * 0.45,
+      size.height * 0.68,
+      size.width * 0.75,
+      size.height * 0.60,
+      size.width * 0.89,
+      size.height * 0.664,
+    );
+
+    path.quadraticBezierTo(
+      size.width * 0.90,
+      size.height * 0.6662,
+      size.width,
+      size.height * 0.715,
+    );
+
+    canvas.drawPath(path, _paint);
   }
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// --- Logic & Math ---
+
+/// Helper class to centralized all responsive calculations.
+/// Extracts "Magic Numbers" from the widget tree for readability and efficiency.
+class _Layout {
+  final double topPadding;
+  final double titleFontSize;
+  final double titleLetterSpacing;
+  final double titleSubtitleGap;
+  final double subtitleFontSize;
+  final double subtitleLetterSpacing;
+  final double spacingAfterHeader;
+  final double spacingBetweenOptions;
+  final double optionSize;
+  final double iconSize;
+  final double optionFontSize;
+  final double optionLetterSpacing;
+  final double optionBorderWidth;
+  final double bottomPadding;
+  final double buttonWidth;
+  final double buttonHeight;
+  final double buttonRadius;
+  final double buttonFontSize;
+  final double buttonLetterSpacing;
+
+  _Layout(Size size)
+      : topPadding = size.height * 0.065,
+        titleFontSize = size.width * 0.067,
+        titleLetterSpacing = size.width * 0.004,
+        titleSubtitleGap = size.height * 0.008,
+        subtitleFontSize = size.width * 0.038,
+        subtitleLetterSpacing = size.width * 0.0033,
+        spacingAfterHeader = size.height * 0.08,
+        spacingBetweenOptions = size.height * 0.09,
+        optionSize = size.width * 0.44,
+        iconSize = size.width * 0.28,
+        optionFontSize = size.width * 0.05,
+        optionLetterSpacing = size.width * 0.0038,
+        optionBorderWidth = size.width * 0.01,
+        bottomPadding = size.height * 0.11,
+        buttonWidth = size.width * 0.41,
+        buttonHeight = size.height * 0.053,
+        buttonRadius = size.width * 0.1,
+        buttonFontSize = size.width * 0.056,
+        buttonLetterSpacing = size.width * 0.0051;
 }
