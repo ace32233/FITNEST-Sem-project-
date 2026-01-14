@@ -7,6 +7,7 @@ import 'package:pedometer/pedometer.dart';
 import 'dart:async';
 import 'intro_page.dart';
 import 'services/user_goals_service.dart';
+import 'personalized_exercise_screen.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -18,7 +19,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final _supabase = Supabase.instance.client;
   final _goalsService = UserGoalsService();
-  
+
   // Data variables
   int _currentStreak = 0;
   int _steps = 0;
@@ -32,7 +33,7 @@ class _HomePageState extends State<HomePage> {
   int _carbsGoal = 250;
   int _waterIntake = 0;
   int _waterGoal = 3000;
-  
+
   // Step counter
   late StreamSubscription<StepCount> _stepCountSubscription;
   int _initialSteps = 0;
@@ -56,12 +57,13 @@ class _HomePageState extends State<HomePage> {
       final prefs = await SharedPreferences.getInstance();
       final today = DateTime.now().toIso8601String().split('T')[0];
       final savedDate = prefs.getString('step_date') ?? '';
-      
+
       // Reset steps if it's a new day
       if (savedDate != today) {
         await prefs.setString('step_date', today);
         await prefs.setInt('initial_steps', 0);
         _initialSteps = 0;
+        _isStepCounterInitialized = false;
       } else {
         _initialSteps = prefs.getInt('initial_steps') ?? 0;
       }
@@ -83,6 +85,7 @@ class _HomePageState extends State<HomePage> {
       _isStepCounterInitialized = true;
     }
 
+    if (!mounted) return;
     setState(() {
       _steps = event.steps - _initialSteps;
     });
@@ -99,7 +102,7 @@ class _HomePageState extends State<HomePage> {
 
       // Load user goals first
       final goalsData = await _goalsService.getUserGoals();
-      if (goalsData != null) {
+      if (goalsData != null && mounted) {
         setState(() {
           _caloriesGoal = goalsData['calories_goal'] ?? 2500;
           _proteinGoal = goalsData['protein_goal_g'] ?? 150;
@@ -115,7 +118,7 @@ class _HomePageState extends State<HomePage> {
           .eq('user_id', userId)
           .maybeSingle();
 
-      if (streakData != null) {
+      if (streakData != null && mounted) {
         setState(() {
           _currentStreak = streakData['current_streak'] ?? 0;
         });
@@ -130,7 +133,7 @@ class _HomePageState extends State<HomePage> {
           .eq('activity_date', today)
           .maybeSingle();
 
-      if (activityData != null) {
+      if (activityData != null && mounted) {
         setState(() {
           _waterIntake = activityData['water_intake_ml'] ?? 0;
           _waterGoal = activityData['water_goal_ml'] ?? 3000;
@@ -143,9 +146,15 @@ class _HomePageState extends State<HomePage> {
           .select('calories, protein_g, carbs_g, fat_g')
           .eq('user_id', userId)
           .gte('activity_date', today)
-          .lt('activity_date', DateTime.now().add(const Duration(days: 1)).toIso8601String().split('T')[0]);
+          .lt(
+            'activity_date',
+            DateTime.now()
+                .add(const Duration(days: 1))
+                .toIso8601String()
+                .split('T')[0],
+          );
 
-      if (nutritionTotals.isNotEmpty) {
+      if (nutritionTotals.isNotEmpty && mounted) {
         double totalCalories = 0;
         double totalProtein = 0;
         double totalCarbs = 0;
@@ -176,7 +185,7 @@ class _HomePageState extends State<HomePage> {
       if (userId == null) return;
 
       final today = DateTime.now().toIso8601String().split('T')[0];
-      
+
       // Check if streak exists
       final existingStreak = await _supabase
           .from('user_streaks')
@@ -194,7 +203,7 @@ class _HomePageState extends State<HomePage> {
           'streak_start_date': today,
           'total_active_days': 1,
         });
-        setState(() => _currentStreak = 1);
+        if (mounted) setState(() => _currentStreak = 1);
       } else {
         final lastActivityDate = existingStreak['last_activity_date'];
         final lastDate = DateTime.parse(lastActivityDate);
@@ -202,7 +211,7 @@ class _HomePageState extends State<HomePage> {
         final difference = todayDate.difference(lastDate).inDays;
 
         int newStreak = existingStreak['current_streak'];
-        
+
         if (difference == 1) {
           // Continue streak
           newStreak += 1;
@@ -219,11 +228,11 @@ class _HomePageState extends State<HomePage> {
           'current_streak': newStreak,
           'longest_streak': longestStreak,
           'last_activity_date': today,
-          'total_active_days': existingStreak['total_active_days'] + 1,
+          'total_active_days': (existingStreak['total_active_days'] ?? 0) + 1,
           'updated_at': DateTime.now().toIso8601String(),
         }).eq('user_id', userId);
 
-        setState(() => _currentStreak = newStreak);
+        if (mounted) setState(() => _currentStreak = newStreak);
       }
     } catch (e) {
       debugPrint('Error updating streak: $e');
@@ -283,7 +292,7 @@ class _HomePageState extends State<HomePage> {
       await _supabase.auth.signOut();
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
-      
+
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (context) => const IntroPage()),
@@ -299,6 +308,7 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // ✅ UPDATED: Exercise option now navigates to ExercisePage
   void _showAddDialog() {
     showModalBottomSheet(
       context: context,
@@ -370,7 +380,12 @@ class _HomePageState extends State<HomePage> {
                   color: Colors.orange,
                   onTap: () {
                     Navigator.pop(context);
-                    // TODO: Navigate to exercise input screen
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const PersonalizedExerciseScreen(),
+                      ),
+                    );
                   },
                 ),
               ],
@@ -441,7 +456,9 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             Text(
-              _currentStreak > 0 ? "🔥 $_currentStreak Day Streak" : "Start your streak today!",
+              _currentStreak > 0
+                  ? "🔥 $_currentStreak Day Streak"
+                  : "Start your streak today!",
               style: TextStyle(
                 fontSize: 12,
                 color: _currentStreak > 0 ? Colors.orange : Colors.grey,
@@ -519,7 +536,7 @@ class _HomePageState extends State<HomePage> {
                 icon: const Icon(Icons.home, color: Colors.blue, size: 28),
                 onPressed: () {},
               ),
-              const SizedBox(width: 40), // Space for FAB
+              const SizedBox(width: 40),
               IconButton(
                 icon: const Icon(Icons.bar_chart, color: Colors.white, size: 28),
                 onPressed: () {

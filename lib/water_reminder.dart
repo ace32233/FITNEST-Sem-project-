@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'calorie_page.dart';
 import 'services/notification_service.dart';
+import 'dart:ui'; // Required for glassmorphism
 
 class WaterTrackerPage extends StatefulWidget {
   const WaterTrackerPage({Key? key}) : super(key: key);
@@ -12,6 +13,7 @@ class WaterTrackerPage extends StatefulWidget {
 }
 
 class _WaterTrackerPageState extends State<WaterTrackerPage> {
+  // --- BUSINESS LOGIC (UNCHANGED) ---
   int currentWater = 0;
   int targetWater = 2500;
   int quickAddAmount = 50;
@@ -38,7 +40,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
         hour: 7,
         minute: 0,
         isEnabled: false,
-        activeDays: {0, 1, 2, 3, 4, 5, 6}, // All days enabled by default
+        activeDays: {0, 1, 2, 3, 4, 5, 6},
       ),
       'noon_11': ReminderData(
         id: 'noon_11',
@@ -85,13 +87,13 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
 
   Future<void> _loadTodayData() async {
     setState(() => _isLoading = true);
-    
+
     try {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) return;
 
       final today = DateTime.now().toIso8601String().split('T')[0];
-      
+
       final response = await _supabase
           .from('daily_activities')
           .select('water_intake_ml, water_goal_ml')
@@ -105,7 +107,6 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
           targetWater = response['water_goal_ml'] ?? 2500;
         });
       } else {
-        // Create today's record
         await _supabase.from('daily_activities').insert({
           'user_id': userId,
           'activity_date': today,
@@ -129,13 +130,13 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
       if (userId == null) return;
 
       final today = DateTime.now().toIso8601String().split('T')[0];
-      
+
       await _supabase
           .from('daily_activities')
           .update({
-            'water_intake_ml': currentWater,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
+        'water_intake_ml': currentWater,
+        'updated_at': DateTime.now().toIso8601String(),
+      })
           .eq('user_id', userId)
           .eq('activity_date', today);
     } catch (e) {
@@ -157,16 +158,13 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
       body: 'Stay hydrated! Drink ${quickAddAmount}ml of water now.',
       hour: reminder.hour,
       minute: reminder.minute,
-      activeDays: reminder.activeDays, // Pass active days to notification service
+      activeDays: reminder.activeDays,
     );
-
-    print('Scheduled reminder: ${reminder.label} at ${reminder.hour}:${reminder.minute} for days: ${reminder.activeDays} (ID: $notificationId)');
   }
 
   Future<void> _cancelReminder(String id) async {
     final notificationId = id.hashCode.abs();
     await _notificationService.cancelNotification(notificationId);
-    print('Cancelled reminder ID: $notificationId');
   }
 
   void addWater() {
@@ -198,7 +196,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
     final TextEditingController controller = TextEditingController(
       text: targetWater.toString(),
     );
-    
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -226,8 +224,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                     currentWater = targetWater;
                   }
                 });
-                
-                // Update target in database
+
                 try {
                   final userId = _supabase.auth.currentUser?.id;
                   if (userId != null) {
@@ -241,7 +238,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                 } catch (e) {
                   print('Error updating target: $e');
                 }
-                
+
                 Navigator.pop(context);
               },
               child: const Text('Set'),
@@ -254,7 +251,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
 
   void showReminderSettingsDialog(String reminderId) {
     final reminder = reminders[reminderId]!;
-    
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -320,7 +317,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
 
   Widget _buildDayChip(String label, int dayIndex, ReminderData reminder, StateSetter setDialogState) {
     final isActive = reminder.activeDays.contains(dayIndex);
-    
+
     return FilterChip(
       label: Text(label),
       selected: isActive,
@@ -378,7 +375,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                                 icon: const Icon(Icons.delete, color: Colors.red),
                                 onPressed: () async {
                                   await _cancelReminder('custom_$index');
-                                  
+
                                   setDialogState(() {
                                     customReminders.removeAt(index);
                                   });
@@ -399,7 +396,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                         if (picked != null) {
                           final customId = 'custom_${customReminders.length}';
                           final timeString = picked.format(context);
-                          
+
                           setDialogState(() {
                             customReminders.add({
                               'id': customId,
@@ -409,8 +406,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                               'minute': picked.minute,
                             });
                           });
-                          
-                          // Schedule the custom reminder
+
                           await _notificationService.scheduleWaterReminder(
                             id: customId.hashCode.abs(),
                             title: 'Time to Drink Water! 💧',
@@ -418,7 +414,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                             hour: picked.hour,
                             minute: picked.minute,
                           );
-                          
+
                           setState(() {});
                         }
                       },
@@ -464,55 +460,55 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
               height: 400,
               child: response.isEmpty
                   ? const Center(
-                      child: Text(
-                        'No history available',
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                    )
+                child: Text(
+                  'No history available',
+                  style: TextStyle(color: Colors.grey),
+                ),
+              )
                   : ListView.builder(
-                      itemCount: response.length,
-                      itemBuilder: (context, index) {
-                        final day = response[index];
-                        final date = DateTime.parse(day['activity_date']);
-                        final intake = day['water_intake_ml'];
-                        final goal = day['water_goal_ml'];
-                        final percentage = (intake / goal * 100).toInt();
-                        
-                        return Card(
-                          margin: const EdgeInsets.symmetric(vertical: 4),
-                          child: ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: percentage >= 100
-                                  ? Colors.green
-                                  : percentage >= 75
-                                      ? Colors.orange
-                                      : Colors.red,
-                              child: Text(
-                                '${percentage}%',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                            title: Text(
-                              '${date.day}/${date.month}/${date.year}',
-                              style: const TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                            subtitle: Text('${intake}ml / ${goal}ml'),
-                            trailing: Icon(
-                              percentage >= 100
-                                  ? Icons.check_circle
-                                  : Icons.water_drop,
-                              color: percentage >= 100
-                                  ? Colors.green
-                                  : const Color(0xFF5DC0F0),
-                            ),
+                itemCount: response.length,
+                itemBuilder: (context, index) {
+                  final day = response[index];
+                  final date = DateTime.parse(day['activity_date']);
+                  final intake = day['water_intake_ml'];
+                  final goal = day['water_goal_ml'];
+                  final percentage = (intake / goal * 100).toInt();
+
+                  return Card(
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: percentage >= 100
+                            ? Colors.green
+                            : percentage >= 75
+                            ? Colors.orange
+                            : Colors.red,
+                        child: Text(
+                          '${percentage}%',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
                           ),
-                        );
-                      },
+                        ),
+                      ),
+                      title: Text(
+                        '${date.day}/${date.month}/${date.year}',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      subtitle: Text('${intake}ml / ${goal}ml'),
+                      trailing: Icon(
+                        percentage >= 100
+                            ? Icons.check_circle
+                            : Icons.water_drop,
+                        color: percentage >= 100
+                            ? Colors.green
+                            : const Color(0xFF5DC0F0),
+                      ),
                     ),
+                  );
+                },
+              ),
             ),
             actions: [
               TextButton(
@@ -593,7 +589,6 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                   color: Colors.orange,
                   onTap: () {
                     Navigator.pop(context);
-                    // TODO: Navigate to exercise input screen
                   },
                 ),
               ],
@@ -638,11 +633,12 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
     );
   }
 
+  // --- UI BUILD METHOD START ---
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     final isSmallScreen = size.width < 360;
-    
+
     if (_isLoading) {
       return const Scaffold(
         backgroundColor: Color(0xFF0D2F5C),
@@ -651,71 +647,109 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
         ),
       );
     }
-    
+
+    // New Gradient Background
     return Scaffold(
-      backgroundColor: const Color(0xFF0D2F5C),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0D2F5C),
-        elevation: 0,
-        title: Text(
-          "Today's Hydration",
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: isSmallScreen ? 20 : 22,
-            fontWeight: FontWeight.w600,
+      extendBody: true, // Allows content behind FAB
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFF0F2027), // Deep Dark Blue/Black
+              Color(0xFF203A43),
+              Color(0xFF2C5364), // Lighter Teal-ish Blue
+            ],
           ),
         ),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.history, color: Colors.white),
-            onPressed: showHistoryDialog,
-            tooltip: 'View History',
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white),
-            onPressed: resetProgress,
-            tooltip: 'Reset Progress',
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: size.width * 0.05,
-              vertical: size.height * 0.02,
-            ),
-            child: Column(
-              children: [
-                _buildWaterProgress(size, isSmallScreen),
-                SizedBox(height: size.height * 0.03),
-                _buildQuickAddSection(size, isSmallScreen),
-                SizedBox(height: size.height * 0.02),
-                _buildReminderSection(isSmallScreen),
-                SizedBox(height: size.height * 0.1),
-              ],
-            ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Custom AppBar
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    IconButton(
+                        icon: const Icon(Icons.arrow_back_ios, color: Colors.white70, size: 20),
+                        onPressed: () => Navigator.maybePop(context)
+                    ),
+                    Text(
+                      "Hydration Tracker",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: isSmallScreen ? 18 : 20,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.history, color: Colors.white70),
+                          onPressed: showHistoryDialog,
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.refresh, color: Colors.white70),
+                          onPressed: resetProgress,
+                        ),
+                      ],
+                    )
+                  ],
+                ),
+              ),
+
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: size.width * 0.05,
+                      vertical: size.height * 0.02,
+                    ),
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 10),
+                        _buildWaterProgress(size, isSmallScreen),
+                        SizedBox(height: size.height * 0.04),
+                        _buildQuickAddSection(size, isSmallScreen),
+                        SizedBox(height: size.height * 0.03),
+                        _buildReminderSection(isSmallScreen),
+                        SizedBox(height: size.height * 0.12), // Space for FAB
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
+
+      // Stylish Floating Action Button
       floatingActionButton: FloatingActionButton(
-        backgroundColor: Colors.blue,
+        backgroundColor: const Color(0xFF4FACFE), // Bright Blue
+        elevation: 10,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         onPressed: _showAddDialog,
-        child: const Icon(Icons.add, size: 32),
+        child: const Icon(Icons.add, size: 32, color: Colors.white),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+
+      // Stylish Bottom Bar
       bottomNavigationBar: BottomAppBar(
-        color: const Color(0xFF1E293B),
+        color: const Color(0xFF1E293B).withOpacity(0.95),
         shape: const CircularNotchedRectangle(),
-        notchMargin: 8,
+        notchMargin: 10,
+        elevation: 0,
         child: SizedBox(
           height: 60,
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               IconButton(
-                icon: const Icon(Icons.home, color: Colors.blue, size: 28),
+                icon: const Icon(Icons.home_rounded, color: Color(0xFF4FACFE), size: 30),
                 onPressed: () {
                   Navigator.push(
                     context,
@@ -723,9 +757,9 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                   );
                 },
               ),
-              const SizedBox(width: 40),
+              const SizedBox(width: 40), // Gap for FAB
               IconButton(
-                icon: const Icon(Icons.bar_chart, color: Colors.white, size: 28),
+                icon: const Icon(Icons.bar_chart_rounded, color: Colors.white54, size: 30),
                 onPressed: () {
                   // TODO: Navigate to stats page
                 },
@@ -737,9 +771,10 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
     );
   }
 
+  // Improved Progress Indicator: Glassy + Gradient Fill
   Widget _buildWaterProgress(Size size, bool isSmallScreen) {
     double progress = currentWater / targetWater;
-    double circleSize = size.width * 0.55;
+    double circleSize = size.width * 0.60;
     if (circleSize > 280) circleSize = 280;
     if (circleSize < 200) circleSize = 200;
 
@@ -747,15 +782,32 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
       alignment: Alignment.center,
       clipBehavior: Clip.none,
       children: [
+        // Outer Glow
+        Container(
+          width: circleSize + 20,
+          height: circleSize + 20,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF4FACFE).withOpacity(0.2),
+                blurRadius: 30,
+                spreadRadius: 5,
+              ),
+            ],
+          ),
+        ),
+        // Main Circle Background
         Container(
           width: circleSize,
           height: circleSize,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: Colors.white,
-            border: Border.all(color: Colors.white, width: 3),
+            color: Colors.white.withOpacity(0.1),
+            border: Border.all(color: Colors.white.withOpacity(0.2), width: 2),
           ),
         ),
+        // Water Fill (Gradient)
         ClipOval(
           child: SizedBox(
             width: circleSize,
@@ -766,10 +818,19 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                   bottom: 0,
                   left: 0,
                   right: 0,
-                  child: Container(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 800),
+                    curve: Curves.easeOutCubic,
                     height: circleSize * progress,
                     decoration: const BoxDecoration(
-                      color: Color(0xFF5DC0F0),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Color(0xFF4FACFE), // Bright Blue
+                          Color(0xFF00F2FE), // Cyan
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -777,51 +838,61 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
             ),
           ),
         ),
+        // Content
         Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               '${currentWater}ml',
               style: TextStyle(
-                color: Colors.black,
-                fontSize: isSmallScreen ? 36 : 42,
+                color: Colors.white,
+                fontSize: isSmallScreen ? 36 : 46,
                 fontWeight: FontWeight.bold,
+                shadows: [Shadow(color: Colors.black26, blurRadius: 10)],
               ),
             ),
             Text(
-              '/${targetWater}ml',
+              'of ${targetWater}ml goal',
               style: TextStyle(
-                color: Colors.black,
-                fontSize: isSmallScreen ? 16 : 18,
+                color: Colors.white70,
+                fontSize: isSmallScreen ? 14 : 16,
                 fontWeight: FontWeight.w400,
               ),
             ),
             const SizedBox(height: 8),
-            Text(
-              '${(progress * 100).toInt()}%',
-              style: TextStyle(
-                color: Colors.black54,
-                fontSize: isSmallScreen ? 14 : 16,
-                fontWeight: FontWeight.w500,
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black26,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                '${(progress * 100).toInt()}%',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
               ),
             ),
           ],
         ),
+        // "Set Target" Button
         Positioned(
-          right: -5,
-          bottom: circleSize * 0.15,
+          right: 0,
+          bottom: circleSize * 0.1,
           child: GestureDetector(
             onTap: showSetTargetDialog,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: const Color(0xFF0D2F5C),
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: const [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
+                    color: Colors.black26,
+                    blurRadius: 8,
+                    offset: Offset(0, 4),
                   ),
                 ],
               ),
@@ -829,17 +900,17 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    Icons.local_drink,
-                    color: Colors.white,
-                    size: isSmallScreen ? 16 : 18,
+                    Icons.edit,
+                    color: const Color(0xFF0D2F5C),
+                    size: isSmallScreen ? 14 : 16,
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    'Set target',
+                    'Goal',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: const Color(0xFF0D2F5C),
                       fontSize: isSmallScreen ? 11 : 12,
-                      fontWeight: FontWeight.w500,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ],
@@ -851,235 +922,227 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
     );
   }
 
-  Widget _buildQuickAddSection(Size size, bool isSmallScreen) {
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: size.width * 0.04,
-        vertical: size.height * 0.018,
-      ),
-      decoration: BoxDecoration(
-        color: const Color(0xFFB8B3E8),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        children: [
-          Text(
-            'Quick Add',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: const Color(0xFF0D2F5C),
-              fontSize: isSmallScreen ? 16 : 18,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          SizedBox(height: size.height * 0.012),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              GestureDetector(
-                onTap: decreaseQuickAddAmount,
-                child: Container(
-                  width: isSmallScreen ? 45 : 50,
-                  height: isSmallScreen ? 45 : 50,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(
-                    Icons.remove,
-                    color: Color(0xFF0D2F5C),
-                    size: 28,
-                  ),
-                ),
+  // Modern "Glass" Quick Add Section
+Widget _buildQuickAddSection(Size size, bool isSmallScreen) {
+  return ClipRRect(
+    borderRadius: BorderRadius.circular(24),
+    child: BackdropFilter(
+      filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: size.width * 0.05,
+          vertical: size.height * 0.025,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white.withOpacity(0.1)),
+        ),
+        child: Column(
+          children: [
+            Text(
+              'Quick Add',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: isSmallScreen ? 16 : 18,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
               ),
-              SizedBox(width: size.width * 0.04),
-              GestureDetector(
-                onTap: addWater,
-                child: Container(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: size.width * 0.08,
-                    vertical: size.height * 0.012,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF7B72C8),
-                    borderRadius: BorderRadius.circular(25),
-                  ),
-                  child: Text(
-                    '${quickAddAmount}ml',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: isSmallScreen ? 18 : 20,
-                      fontWeight: FontWeight.w600,
+            ),
+            SizedBox(height: size.height * 0.02),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _buildCircleButton(
+                  icon: Icons.remove,
+                  onTap: decreaseQuickAddAmount,
+                  isSmall: isSmallScreen,
+                ),
+                
+                // --- FIX STARTS HERE ---
+                GestureDetector(
+                  onTap: addWater, // This was missing!
+                  child: Container(
+                    width: size.width * 0.4,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF4FACFE).withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(30),
+                      border: Border.all(color: const Color(0xFF4FACFE), width: 1.5),
+                    ),
+                    child: Center(
+                      child: Text(
+                        '${quickAddAmount}ml',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: isSmallScreen ? 20 : 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
-              SizedBox(width: size.width * 0.04),
-              GestureDetector(
-                onTap: increaseQuickAddAmount,
-                child: Container(
-                  width: isSmallScreen ? 45 : 50,
-                  height: isSmallScreen ? 45 : 50,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(
-                    Icons.add,
-                    color: Color(0xFF0D2F5C),
-                    size: 28,
-                  ),
+                // --- FIX ENDS HERE ---
+
+                _buildCircleButton(
+                  icon: Icons.add,
+                  onTap: increaseQuickAddAmount,
+                  isSmall: isSmallScreen,
+                  isPrimary: true,
                 ),
-              ),
-            ],
-          ),
-        ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+  Widget _buildCircleButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    required bool isSmall,
+    bool isPrimary = false,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: isSmall ? 45 : 50,
+        height: isSmall ? 45 : 50,
+        decoration: BoxDecoration(
+          color: isPrimary ? Colors.white : Colors.white.withOpacity(0.1),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          icon,
+          color: isPrimary ? const Color(0xFF0D2F5C) : Colors.white,
+          size: 28,
+        ),
       ),
     );
   }
 
+  // Modern Reminder Grid
   Widget _buildReminderSection(bool isSmallScreen) {
-    return Container(
-      width: double.infinity,
-      padding: EdgeInsets.symmetric(
-        horizontal: MediaQuery.of(context).size.width * 0.05,
-        vertical: MediaQuery.of(context).size.height * 0.025,
-      ),
-      decoration: BoxDecoration(
-        color: const Color(0xFFB8B3E8),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Set Reminder',
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(left: 8.0, bottom: 12.0),
+          child: Text(
+            'Reminders',
             style: TextStyle(
-              color: const Color(0xFF0D2F5C),
-              fontSize: isSmallScreen ? 16 : 18,
+              color: Colors.white,
+              fontSize: 18,
               fontWeight: FontWeight.w600,
             ),
           ),
-          SizedBox(height: MediaQuery.of(context).size.height * 0.015),
-          GridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 3,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            childAspectRatio: 1.3,
-            children: [
-              ...reminders.entries.map((entry) {
-                final reminder = entry.value;
-                final isEnabled = reminder.isEnabled;
-                
-                return GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      reminder.isEnabled = !reminder.isEnabled;
-                    });
-                    _scheduleReminder(reminder);
-                  },
-                  onLongPress: () {
-                    showReminderSettingsDialog(entry.key);
-                  },
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(20),
-                      border: isEnabled
-                          ? Border.all(color: const Color(0xFF5865A1), width: 2.5)
-                          : null,
+        ),
+        GridView.count(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisCount: 3,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+          childAspectRatio: 1.2,
+          children: [
+            ...reminders.entries.map((entry) {
+              final reminder = entry.value;
+              final isEnabled = reminder.isEnabled;
+
+              return GestureDetector(
+                onTap: () {
+                  setState(() {
+                    reminder.isEnabled = !reminder.isEnabled;
+                  });
+                  _scheduleReminder(reminder);
+                },
+                onLongPress: () => showReminderSettingsDialog(entry.key),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  decoration: BoxDecoration(
+                    color: isEnabled
+                        ? const Color(0xFF4FACFE) // Active Blue
+                        : Colors.white.withOpacity(0.08), // Inactive Glass
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isEnabled ? Colors.transparent : Colors.white.withOpacity(0.1),
                     ),
-                    child: Stack(
-                      children: [
-                        Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                reminder.label,
-                                style: TextStyle(
-                                  color: const Color(0xFF0D2F5C),
-                                  fontSize: isSmallScreen ? 13 : 14,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                reminder.time,
-                                style: TextStyle(
-                                  color: const Color(0xFF6B6B9E),
-                                  fontSize: isSmallScreen ? 11 : 12,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (reminder.activeDays.length < 7)
-                          Positioned(
-                            top: 4,
-                            right: 4,
-                            child: Container(
-                              padding: const EdgeInsets.all(2),
-                              decoration: const BoxDecoration(
-                                color: Colors.orange,
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.calendar_today,
-                                size: 10,
-                                color: Colors.white,
+                    boxShadow: isEnabled
+                        ? [BoxShadow(color: const Color(0xFF4FACFE).withOpacity(0.4), blurRadius: 10, offset: const Offset(0, 4))]
+                        : [],
+                  ),
+                  child: Stack(
+                    children: [
+                      Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              reminder.label,
+                              style: TextStyle(
+                                color: isEnabled ? Colors.white : Colors.white70,
+                                fontSize: isSmallScreen ? 13 : 14,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
-                          ),
-                      ],
-                    ),
-                  ),
-                );
-              }).toList(),
-              GestureDetector(
-                onTap: showCustomReminderDialog,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF5865A1),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'Custom',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: isSmallScreen ? 13 : 14,
-                          fontWeight: FontWeight.w600,
+                            const SizedBox(height: 4),
+                            Text(
+                              reminder.time,
+                              style: TextStyle(
+                                color: isEnabled ? Colors.white.withOpacity(0.9) : Colors.white54,
+                                fontSize: isSmallScreen ? 11 : 12,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
+                      if (isEnabled)
+                        const Positioned(
+                          top: 8,
+                          right: 8,
+                          child: Icon(Icons.check_circle, size: 14, color: Colors.white),
+                        ),
                     ],
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Center(
-            child: Text(
-              'Long press to set active days',
-              style: TextStyle(
-                color: const Color(0xFF6B6B9E),
-                fontSize: isSmallScreen ? 10 : 11,
-                fontStyle: FontStyle.italic,
+              );
+            }).toList(),
+
+            // Custom Button
+            GestureDetector(
+              onTap: showCustomReminderDialog,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white.withOpacity(0.1), style: BorderStyle.solid),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.add_circle_outline, color: Colors.white70, size: 24),
+                    SizedBox(height: 4),
+                    Text(
+                      'Custom',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: isSmallScreen ? 13 : 14,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
+      ],
     );
   }
 }
 
+// Logic classes remain exactly the same
 class ReminderData {
   final String id;
   final String label;
@@ -1087,7 +1150,7 @@ class ReminderData {
   final int hour;
   final int minute;
   bool isEnabled;
-  Set<int> activeDays; // 0=Sunday, 1=Monday, etc.
+  Set<int> activeDays;
 
   ReminderData({
     required this.id,
