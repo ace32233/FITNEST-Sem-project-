@@ -1,7 +1,8 @@
 import 'dart:convert';
 import 'dart:developer';
-import 'package:google_generative_ai/google_generative_ai.dart';
+
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:google_generative_ai/google_generative_ai.dart';
 
 class NutritionData {
   final String foodName;
@@ -12,7 +13,7 @@ class NutritionData {
   final double fat;
   final bool isValid;
 
-  NutritionData({
+  const NutritionData({
     required this.foodName,
     required this.servingSize,
     required this.calories,
@@ -22,174 +23,134 @@ class NutritionData {
     this.isValid = true,
   });
 
-  factory NutritionData.fromJson(Map<String, dynamic> json) {
-    // Check if the response indicates invalid/unknown food
-    final calories = json['calories'];
-    final protein = json['protein_g'];
-    final carbs = json['carbs_g'];
-    final fat = json['fat_g'];
-    
-    // If all nutritional values are null or 0, it's likely invalid
-    final isValid = calories != null && 
-                    (calories is num && calories > 0 ||
-                     protein is num && protein > 0 ||
-                     carbs is num && carbs > 0 ||
-                     fat is num && fat > 0);
-
-    return NutritionData(
-      foodName: json['food_name'] ?? '',
-      servingSize: json['serving_size'] ?? '',
-      calories: (calories ?? 0).toDouble(),
-      protein: (protein ?? 0).toDouble(),
-      carbs: (carbs ?? 0).toDouble(),
-      fat: (fat ?? 0).toDouble(),
-      isValid: isValid,
-    );
+  static double _toDouble(dynamic v) {
+    if (v == null) return 0;
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v.trim()) ?? 0;
+    return 0;
   }
 
-  factory NutritionData.invalid() {
+  factory NutritionData.fromJson(Map<String, dynamic> json) {
+    final calories = _toDouble(json['calories']);
+    final protein = _toDouble(json['protein_g']);
+    final carbs = _toDouble(json['carbs_g']);
+    final fat = _toDouble(json['fat_g']);
+
+    // valid if any macro/calorie is > 0 and is_valid is not false
+    final bool ok = (json['is_valid'] != false) &&
+        (calories > 0 || protein > 0 || carbs > 0 || fat > 0);
+
     return NutritionData(
-      foodName: '',
-      servingSize: '',
-      calories: 0,
-      protein: 0,
-      carbs: 0,
-      fat: 0,
-      isValid: false,
+      foodName: (json['food_name'] ?? '').toString(),
+      servingSize: (json['serving_size'] ?? '').toString(),
+      calories: calories,
+      protein: protein,
+      carbs: carbs,
+      fat: fat,
+      isValid: ok,
     );
   }
 }
 
 class GeminiNutritionService {
   late final GenerativeModel _model;
-  
-  // Cache for common invalid inputs
-  static final Set<String> _invalidInputPatterns = {
-    'sql', 'select', 'drop', 'table', 'database',
-    'script', 'alert', 'javascript', 'html',
-    'http://', 'https://', 'www.',
-  };
 
   GeminiNutritionService() {
     final apiKey = dotenv.env['GEMINI_API_KEY'];
-
-    if (apiKey == null || apiKey.isEmpty) {
+    if (apiKey == null || apiKey.trim().isEmpty) {
       throw Exception('GEMINI_API_KEY not found in .env');
     }
 
     _model = GenerativeModel(
-      model: 'gemini-2.5-flash',
-      apiKey: apiKey,
+      model: 'gemini-2.5-flash', // ✅ best for your use
+      apiKey: apiKey.trim(),
       generationConfig: GenerationConfig(
-        temperature: 0.1, // Lower temperature for more consistent output
-        maxOutputTokens: 500,
+        temperature: 0.1,
+        maxOutputTokens: 300,
+        // ✅ forces JSON output (prevents parsing issues)
+        responseMimeType: 'application/json',
       ),
     );
   }
 
-  /// Validates input before sending to API
   bool _isValidFoodInput(String input) {
-    if (input.trim().isEmpty) return false;
-    if (input.length > 200) return false; // Prevent excessively long inputs
-    
-    final lowerInput = input.toLowerCase();
-    
-    // Check for suspicious patterns
-    if (_invalidInputPatterns.any((pattern) => lowerInput.contains(pattern))) {
-      return false;
-    }
-    
-    // Check for excessive special characters (possible injection attempts)
-    final specialCharCount = RegExp(r'[^a-zA-Z0-9\s,.-]').allMatches(input).length;
-    if (specialCharCount > input.length * 0.3) return false;
-    
-    return true;
+    final s = input.trim();
+    if (s.isEmpty) return false;
+    if (s.length > 200) return false;
+
+    // block obvious injection / urls
+    final suspicious = RegExp(
+      r'(<script\b|</\w+>|http[s]?:\/\/|www\.|\bselect\b|\bdrop\b|\binsert\b|\bdelete\b|\bupdate\b|;--|\bunion\b)',
+      caseSensitive: false,
+    );
+    return !suspicious.hasMatch(s);
   }
 
-  Future<NutritionData?> getNutritionInfo(String foodInput) async {
-    try {
-      // Pre-validation
-      if (!_isValidFoodInput(foodInput)) {
-        log('Invalid food input detected: $foodInput');
-        return null;
-      }
-
-      final prompt = '''
-You are a nutrition information assistant. Analyze ONLY if the input is a valid food item with optional quantity.
+  String _prompt(String foodInput) => '''
+Return nutrition facts for a user-entered food line.
 
 Input: "$foodInput"
 
-STRICT RULES:
-1. ONLY respond if the input is a legitimate food or beverage item
-2. Reject if input contains: code, URLs, commands, nonsense text, or non-food items
-3. Accept quantities like "2 apples", "1 cup rice", "100g chicken"
-4. If invalid or not food-related, return: {"is_valid": false}
-5. For valid food, return ONLY this JSON structure with NO markdown or extra text:
+If input is NOT a food or beverage item, return ONLY:
+{"is_valid": false}
 
+If valid, return ONLY JSON exactly like:
 {
   "is_valid": true,
   "food_name": "clear food name",
-  "serving_size": "quantity specified or standard serving",
+  "serving_size": "quantity specified or a reasonable standard serving",
   "calories": number,
   "protein_g": number,
   "carbs_g": number,
   "fat_g": number
 }
-
-Return ONLY the JSON object, nothing else.
 ''';
 
-      final response = await _model.generateContent(
-        [Content.text(prompt)],
-      );
-
-      if (response.text == null || response.text!.isEmpty) {
-        log('Empty response from Gemini');
+  /// ✅ This matches your NutritionPage code (returns NutritionData?).
+  Future<NutritionData?> getNutritionInfo(String foodInput) async {
+    try {
+      if (!_isValidFoodInput(foodInput)) {
+        log('GeminiNutritionService: rejected input="$foodInput"');
         return null;
       }
 
-      // Clean the response
-      String cleanJson = response.text!
-          .replaceAll(RegExp(r'```json|```'), '')
-          .trim();
+      final response = await _model.generateContent([Content.text(_prompt(foodInput))]);
+      final text = response.text;
 
-      // Extract JSON object
-      final start = cleanJson.indexOf('{');
-      final end = cleanJson.lastIndexOf('}');
-      
-      if (start == -1 || end == -1) {
-        log('No valid JSON found in response');
+      if (text == null || text.trim().isEmpty) {
+        log('GeminiNutritionService: empty response');
         return null;
       }
 
-      cleanJson = cleanJson.substring(start, end + 1);
+      // responseMimeType=json should already be clean JSON, but still guard.
+      final cleaned = text.trim();
 
-      final jsonData = json.decode(cleanJson) as Map<String, dynamic>;
-      
-      // Check if the API marked it as invalid
-      if (jsonData['is_valid'] == false) {
-        log('API marked input as invalid food item');
+      final decoded = json.decode(cleaned);
+      if (decoded is! Map<String, dynamic>) {
+        log('GeminiNutritionService: JSON is not an object. raw="$cleaned"');
         return null;
       }
 
-      final nutritionData = NutritionData.fromJson(jsonData);
-      
-      // Final validation check
-      if (!nutritionData.isValid) {
-        log('Nutrition data validation failed');
+      if (decoded['is_valid'] == false) {
+        log('GeminiNutritionService: model marked invalid');
         return null;
       }
 
-      return nutritionData;
-      
-    } on FormatException catch (e) {
-      log('JSON parsing error', error: e);
-      return null;
+      final data = NutritionData.fromJson(decoded);
+      if (!data.isValid) {
+        log('GeminiNutritionService: parsed but invalid macros');
+        return null;
+      }
+
+      return data;
     } on GenerativeAIException catch (e) {
-      log('Gemini API error', error: e);
+      log('GeminiNutritionService: Gemini API error: ${e.message}', error: e);
+      return null;
+    } on FormatException catch (e) {
+      log('GeminiNutritionService: JSON parse error', error: e);
       return null;
     } catch (e) {
-      log('Unexpected error in getNutritionInfo', error: e);
+      log('GeminiNutritionService: unexpected error', error: e);
       return null;
     }
   }

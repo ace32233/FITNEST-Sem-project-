@@ -38,6 +38,9 @@ class Exercise {
   final String bodyPart;
   final String target;
   final String equipment;
+
+  // Kept only so your Supabase "workout_logs" JSON can store it.
+  // In ExerciseDB v2.2, gifUrl usually is NOT included in exercise list responses.
   final String gifUrl;
 
   const Exercise({
@@ -58,19 +61,18 @@ class Exercise {
       return fallback;
     }
 
-    // FIX 1: Trim whitespace.
-    // FIX 2: Force HTTPS (Android blocks HTTP).
+    // Optional gifUrl - safe default
     String rawGif = pickStr(['gifUrl', 'gif_url'], fallback: '').trim();
     if (rawGif.startsWith('http://')) {
       rawGif = rawGif.replaceFirst('http://', 'https://');
     }
 
     return Exercise(
-      id: pickStr(['id', 'uuid', 'exerciseId'], fallback: ''),
-      name: pickStr(['name'], fallback: ''),
-      bodyPart: pickStr(['bodyPart', 'body_part'], fallback: ''),
-      target: pickStr(['target'], fallback: ''),
-      equipment: pickStr(['equipment'], fallback: ''),
+      id: pickStr(['id', 'uuid', 'exerciseId'], fallback: '').trim(),
+      name: pickStr(['name'], fallback: '').trim(),
+      bodyPart: pickStr(['bodyPart', 'body_part'], fallback: '').trim(),
+      target: pickStr(['target'], fallback: '').trim(),
+      equipment: pickStr(['equipment'], fallback: '').trim(),
       gifUrl: rawGif,
     );
   }
@@ -104,7 +106,9 @@ double _asDouble(dynamic v) {
 
 String _todayDateKey() {
   final now = DateTime.now();
-  return '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+  return '${now.year.toString().padLeft(4, '0')}-'
+      '${now.month.toString().padLeft(2, '0')}-'
+      '${now.day.toString().padLeft(2, '0')}';
 }
 
 String levelFromBmiAndAge({required double bmi, required int age}) {
@@ -113,6 +117,25 @@ String levelFromBmiAndAge({required double bmi, required int age}) {
   if (bmi < 30) return 'intermediate';
   return 'beginner';
 }
+
+/// ✅ Correct ExerciseDB v2.2 image URL (GET /image?resolution=...&exerciseId=...)
+String _exerciseGifUrl(String exerciseId, {int resolution = 180}) {
+  final id = exerciseId.trim();
+  if (id.isEmpty) return '';
+
+  
+  if (resolution != 180) resolution = 180;
+
+  return Uri.https(
+    'exercisedb.p.rapidapi.com',
+    '/image',
+    {
+      'resolution': '180',
+      'exerciseId': id,
+    },
+  ).toString();
+}
+
 
 /// ------------------------------
 /// Supabase Profile
@@ -178,7 +201,6 @@ extension MuscleGroupX on MuscleGroup {
   }
 }
 
-/// ExerciseDB bodyPart mapping
 const Map<MuscleGroup, List<String>> groupToBodyParts = {
   MuscleGroup.back: ['back'],
   MuscleGroup.chest: ['chest'],
@@ -197,8 +219,8 @@ Future<http.Response> _exerciseDbGet(Uri uri) async {
   final apiKey = dotenv.env['EXERCISE_API_KEY'] ?? '';
   final host = dotenv.env['EXERCISE_API_HOST'] ?? 'exercisedb.p.rapidapi.com';
 
-  if (apiKey.isEmpty) {
-    throw Exception('Exercise API credentials not found in .env');
+  if (apiKey.trim().isEmpty) {
+    throw Exception('Exercise API credentials not found in .env (EXERCISE_API_KEY).');
   }
 
   final res = await http.get(
@@ -229,7 +251,7 @@ Future<List<Exercise>> _fetchExercisesForBodyPart(String bodyPart) async {
 
   return decoded
       .map((e) => Exercise.fromJson(e as Map<String, dynamic>))
-      .where((e) => e.name.trim().isNotEmpty)
+      .where((e) => e.name.trim().isNotEmpty && e.id.trim().isNotEmpty)
       .toList();
 }
 
@@ -264,7 +286,7 @@ class WorkoutHistory {
   final String date; // yyyy-mm-dd
   final bool completed;
   final int durationMinutes;
-  final String muscleGroup; // Back/Chest...
+  final String muscleGroup;
   final List<String> exerciseIds;
 
   const WorkoutHistory({
@@ -393,6 +415,7 @@ class WorkoutState {
 class WorkoutController extends StateNotifier<WorkoutState> {
   WorkoutController(this._ref) : super(WorkoutState.empty());
   final Ref _ref;
+
   bool _isSaving = false;
 
   void reset() {
@@ -405,7 +428,7 @@ class WorkoutController extends StateNotifier<WorkoutState> {
       state = WorkoutState.empty();
       return;
     }
-    
+
     final maxLen = min(6, source.length);
     final len = max(3, maxLen);
     final picked = _pickUniqueRandom(source, len);
@@ -509,7 +532,11 @@ class WorkoutController extends StateNotifier<WorkoutState> {
     }
 
     // B) Upsert workout_logs
-    final exercisesJson = state.workout.map((e) => e.toJson()).toList();
+    // Store gifUrl as the "Image Service" URL so it can be replayed later.
+    final exercisesJson = state.workout
+        .map((e) => e.toJson()
+          ..['gifUrl'] = _exerciseGifUrl(e.id))
+        .toList();
 
     final existingLog = await Supabase.instance.client
         .from('workout_logs')
@@ -544,7 +571,9 @@ class WorkoutController extends StateNotifier<WorkoutState> {
 }
 
 final workoutControllerProvider =
-    StateNotifierProvider<WorkoutController, WorkoutState>((ref) => WorkoutController(ref));
+    StateNotifierProvider<WorkoutController, WorkoutState>(
+  (ref) => WorkoutController(ref),
+);
 
 /// ------------------------------
 /// UI
@@ -559,7 +588,7 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
     final exercisesAsync = ref.watch(exercisesForGroupProvider);
     final workout = ref.watch(workoutControllerProvider);
     final todayHistoryAsync = ref.watch(todayHistoryProvider);
-    
+
     final bool alreadyDoneToday = todayHistoryAsync.valueOrNull?.completed ?? false;
 
     return Scaffold(
@@ -591,7 +620,6 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
               error: (e, _) => Text('Profile error: $e'),
             ),
             const SizedBox(height: 12),
-
             todayHistoryAsync.when(
               data: (h) {
                 if (h == null || h.completed != true) return const SizedBox.shrink();
@@ -603,14 +631,12 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
               loading: () => const SizedBox.shrink(),
               error: (_, __) => const SizedBox.shrink(),
             ),
-
             const SizedBox(height: 10),
             const Text(
               'Choose muscle group',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: 10),
-
             SizedBox(
               height: 44,
               child: ListView.separated(
@@ -637,20 +663,17 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
                 },
               ),
             ),
-
             const SizedBox(height: 14),
             Text(
               selectedGroup == null ? 'Exercises' : 'Exercises for: ${selectedGroup.label}',
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: 10),
-
             if (workout.hasWorkout)
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: _WorkoutProgress(done: workout.done, total: workout.total),
               ),
-
             Expanded(
               child: exercisesAsync.when(
                 data: (items) {
@@ -676,7 +699,6 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
           ],
         ),
       ),
-
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
@@ -710,8 +732,8 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
                     height: 54,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: (workout.isFinished || alreadyDoneToday) 
-                            ? Colors.grey 
+                        backgroundColor: (workout.isFinished || alreadyDoneToday)
+                            ? Colors.grey
                             : const Color(0xFF6D4CFF),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       ),
@@ -721,7 +743,9 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
                               if (!workout.hasWorkout) {
                                 if (!canStart) {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Pick a group with at least 3 exercises.')),
+                                    const SnackBar(
+                                      content: Text('Pick a group with at least 3 exercises.'),
+                                    ),
                                   );
                                   return;
                                 }
@@ -736,7 +760,7 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
                               );
                             },
                       child: Text(
-                        alreadyDoneToday 
+                        alreadyDoneToday
                             ? 'Come back tomorrow!'
                             : (workout.hasWorkout ? 'Continue Workout' : 'Start Workout (3-6)'),
                         style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
@@ -746,7 +770,10 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
                 ],
               );
             },
-            loading: () => const SizedBox(height: 54, child: Center(child: CircularProgressIndicator())),
+            loading: () => const SizedBox(
+              height: 54,
+              child: Center(child: CircularProgressIndicator()),
+            ),
             error: (_, __) => const SizedBox.shrink(),
           ),
         ),
@@ -831,13 +858,14 @@ class _WorkoutStepView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // FIX 3: Add API headers to image request
     final apiKey = dotenv.env['EXERCISE_API_KEY'] ?? '';
-    final apiHost = dotenv.env['EXERCISE_API_HOST'] ?? '';
-    
-    // Safety check for empty keys
-    final Map<String, String>? headers = (apiKey.isNotEmpty && apiHost.isNotEmpty) 
-        ? {'X-RapidAPI-Key': apiKey, 'X-RapidAPI-Host': apiHost}
+    final apiHost = dotenv.env['EXERCISE_API_HOST'] ?? 'exercisedb.p.rapidapi.com';
+
+    final Map<String, String>? headers = apiKey.isNotEmpty
+        ? {
+            'X-RapidAPI-Key': apiKey,
+            'X-RapidAPI-Host': apiHost,
+          }
         : null;
 
     return Column(
@@ -865,7 +893,10 @@ class _WorkoutStepView extends StatelessWidget {
                 borderRadius: BorderRadius.circular(14),
                 child: AspectRatio(
                   aspectRatio: 16 / 10,
-                  child: _ExerciseGif(url: exercise.gifUrl, headers: headers),
+                  child: _ExerciseGif(
+                    url: _exerciseGifUrl(exercise.id, resolution: 180),
+                    headers: headers,
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -944,22 +975,22 @@ class _WorkoutStepView extends StatelessWidget {
 class _ExerciseGif extends StatelessWidget {
   final String url;
   final Map<String, String>? headers;
-  
+
   const _ExerciseGif({required this.url, this.headers});
 
   @override
   Widget build(BuildContext context) {
     if (url.trim().isEmpty) {
       return Container(
-        color: Colors.black12, 
-        alignment: Alignment.center, 
+        color: Colors.black12,
+        alignment: Alignment.center,
         child: const Text('No Preview', style: TextStyle(color: Colors.black45)),
       );
     }
 
     return Image.network(
       url,
-      headers: headers, // Pass auth headers here
+      headers: headers,
       fit: BoxFit.cover,
       filterQuality: FilterQuality.medium,
       loadingBuilder: (c, child, progress) {
@@ -970,18 +1001,18 @@ class _ExerciseGif extends StatelessWidget {
           child: const CircularProgressIndicator(),
         );
       },
-      errorBuilder: (_, error, stackTrace) {
+      errorBuilder: (_, error, __) {
         debugPrint('[IMAGE ERROR] Failed to load: $url\nError: $error');
         return Container(
           color: Colors.black12,
           alignment: Alignment.center,
           padding: const EdgeInsets.all(12),
-          child: Column(
+          child: const Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.broken_image, color: Colors.black38, size: 32),
-              const SizedBox(height: 4),
-              const Text(
+              Icon(Icons.broken_image, color: Colors.black38, size: 32),
+              SizedBox(height: 4),
+              Text(
                 'No Preview',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black45),
@@ -1013,9 +1044,15 @@ class _CompletedView extends StatelessWidget {
           children: [
             const Icon(Icons.celebration, size: 42),
             const SizedBox(height: 10),
-            const Text('Workout Completed!', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+            const Text(
+              'Workout Completed!',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+            ),
             const SizedBox(height: 6),
-            const Text('Saved locally + Supabase (daily_activities + workout_logs)', style: TextStyle(fontWeight: FontWeight.w700)),
+            const Text(
+              'Saved locally + Supabase (daily_activities + workout_logs)',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 12),
             ElevatedButton(onPressed: onDone, child: const Text('Back')),
           ],
@@ -1026,7 +1063,7 @@ class _CompletedView extends StatelessWidget {
 }
 
 /// ------------------------------
-/// UI bits
+/// UI bits (unchanged UI)
 /// ------------------------------
 class _ProfileCard extends StatelessWidget {
   final int age;
@@ -1044,7 +1081,9 @@ class _ProfileCard extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.black12),
-        boxShadow: const [BoxShadow(blurRadius: 16, offset: Offset(0, 6), color: Color(0x14000000))],
+        boxShadow: const [
+          BoxShadow(blurRadius: 16, offset: Offset(0, 6), color: Color(0x14000000)),
+        ],
       ),
       child: Row(
         children: [
@@ -1068,13 +1107,17 @@ class _ExerciseCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // FIX 3: Also add headers to the list view thumbnail
     final apiKey = dotenv.env['EXERCISE_API_KEY'] ?? '';
-    final apiHost = dotenv.env['EXERCISE_API_HOST'] ?? '';
-    
-    final Map<String, String>? headers = (apiKey.isNotEmpty && apiHost.isNotEmpty) 
-        ? {'X-RapidAPI-Key': apiKey, 'X-RapidAPI-Host': apiHost}
+    final apiHost = dotenv.env['EXERCISE_API_HOST'] ?? 'exercisedb.p.rapidapi.com';
+
+    final Map<String, String>? headers = apiKey.isNotEmpty
+        ? {
+            'X-RapidAPI-Key': apiKey,
+            'X-RapidAPI-Host': apiHost,
+          }
         : null;
+
+    final thumbUrl = _exerciseGifUrl(ex.id, resolution: 180);
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -1082,7 +1125,9 @@ class _ExerciseCard extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.black12),
-        boxShadow: const [BoxShadow(blurRadius: 16, offset: Offset(0, 6), color: Color(0x14000000))],
+        boxShadow: const [
+          BoxShadow(blurRadius: 16, offset: Offset(0, 6), color: Color(0x14000000)),
+        ],
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1093,18 +1138,18 @@ class _ExerciseCard extends StatelessWidget {
               width: 90,
               height: 90,
               color: const Color(0xFFF1ECFF),
-              child: ex.gifUrl.isEmpty
+              child: ex.id.trim().isEmpty
                   ? const Center(child: Icon(Icons.image_not_supported, color: Colors.black26))
                   : Image.network(
-                      ex.gifUrl,
-                      headers: headers, // Pass auth headers
+                      thumbUrl,
+                      headers: headers,
                       fit: BoxFit.cover,
                       loadingBuilder: (context, child, loadingProgress) {
                         if (loadingProgress == null) return child;
                         return const Center(child: Icon(Icons.image, color: Colors.black12));
                       },
-                      errorBuilder: (_, error, stackTrace) {
-                        debugPrint('[LIST IMAGE ERROR] ${ex.name}: ${ex.gifUrl}');
+                      errorBuilder: (_, error, __) {
+                        debugPrint('[LIST IMAGE ERROR] ${ex.name}: $thumbUrl\nError: $error');
                         return const Center(child: Icon(Icons.broken_image, color: Colors.black26));
                       },
                     ),
@@ -1115,7 +1160,10 @@ class _ExerciseCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(_prettyName(ex.name), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
+                Text(
+                  _prettyName(ex.name),
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
+                ),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
@@ -1194,7 +1242,12 @@ class _InfoBanner extends StatelessWidget {
   final String? actionText;
   final VoidCallback? onAction;
 
-  const _InfoBanner({required this.icon, required this.text, this.actionText, this.onAction});
+  const _InfoBanner({
+    required this.icon,
+    required this.text,
+    this.actionText,
+    this.onAction,
+  });
 
   @override
   Widget build(BuildContext context) {

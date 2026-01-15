@@ -1,13 +1,10 @@
 import 'package:fittness_app/home_page.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'water_reminder.dart';
-import 'services/gemini_nutrition_service.dart';
 import 'services/supabase_nutrition_service.dart';
 import 'services/user_goals_service.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+import 'services/fatsecret_nutrition_service.dart';
 
 class NutritionPage extends StatefulWidget {
   const NutritionPage({super.key});
@@ -18,23 +15,20 @@ class NutritionPage extends StatefulWidget {
 
 class _NutritionPageState extends State<NutritionPage> {
   final TextEditingController _foodController = TextEditingController();
-  final GeminiNutritionService _geminiService = GeminiNutritionService();
+  final FatSecretNutritionService _nutritionService = FatSecretNutritionService();
   final SupabaseNutritionService _supabaseService = SupabaseNutritionService();
   final UserGoalsService _goalsService = UserGoalsService();
 
-  // Nutrition values
   double caloriesValue = 0;
   double caloriesLimit = 2500;
   double proteinValue = 0;
   double carbsValue = 0;
   double fatValue = 0;
 
-  // Target values (in grams)
   double proteinTarget = 150;
   double carbsTarget = 250;
   double fatTarget = 70;
 
-  // Food log items
   List<Map<String, dynamic>> foodLog = [];
   bool isLoading = false;
   bool isCalculating = false;
@@ -51,44 +45,56 @@ class _NutritionPageState extends State<NutritionPage> {
     super.dispose();
   }
 
+  double _toDouble(dynamic v) {
+    if (v == null) return 0;
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v.trim()) ?? 0;
+    return 0;
+  }
+
+  int _toInt(dynamic v) {
+    if (v == null) return 0;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v.trim()) ?? 0;
+    return 0;
+  }
+
   Future<void> _loadTodayData() async {
     setState(() => isLoading = true);
 
     try {
-      // Load user goals first
       final goalsData = await _goalsService.getUserGoals();
       if (goalsData != null) {
         setState(() {
-          caloriesLimit = (goalsData['calories_goal'] ?? 2500).toDouble();
-          proteinTarget = (goalsData['protein_goal_g'] ?? 150).toDouble();
-          carbsTarget = (goalsData['carbs_goal_g'] ?? 250).toDouble();
-          fatTarget = (goalsData['fat_goal_g'] ?? 70).toDouble();
+          caloriesLimit = _toDouble(goalsData['calories_goal'] ?? 2500);
+          proteinTarget = _toDouble(goalsData['protein_goal_g'] ?? 150);
+          carbsTarget = _toDouble(goalsData['carbs_goal_g'] ?? 250);
+          fatTarget = _toDouble(goalsData['fat_goal_g'] ?? 70);
         });
       }
 
-      // Load totals
       final totals = await _supabaseService.getTodayTotals();
-      
-      // Load meal logs
       final meals = await _supabaseService.getTodayMeals();
 
       setState(() {
-        caloriesValue = (totals['calories'] ?? 0).toDouble();
-        proteinValue = (totals['protein'] ?? 0).toDouble();
-        carbsValue = (totals['carbs'] ?? 0).toDouble();
-        fatValue = (totals['fat'] ?? 0).toDouble();
+        caloriesValue = _toDouble(totals['calories']);
+        proteinValue = _toDouble(totals['protein']);
+        carbsValue = _toDouble(totals['carbs']);
+        fatValue = _toDouble(totals['fat']);
         foodLog = meals;
         isLoading = false;
       });
     } catch (e) {
-      print('Error loading data: $e');
       setState(() => isLoading = false);
       _showErrorSnackBar('Failed to load data');
     }
   }
 
   Future<void> _addMeal() async {
-    if (_foodController.text.isEmpty) {
+    final input = _foodController.text.trim();
+
+    if (input.isEmpty) {
       _showErrorSnackBar('Please enter food name');
       return;
     }
@@ -96,8 +102,17 @@ class _NutritionPageState extends State<NutritionPage> {
     setState(() => isCalculating = true);
 
     try {
-      // Call Gemini API
-      final nutritionData = await _geminiService.getNutritionInfo(_foodController.text);
+      print('ADD MEAL pressed. input="$input"');
+
+      final nutritionData = await _nutritionService.getNutritionInfo(input);
+
+      print('FatSecret returned null? ${nutritionData == null}');
+      if (nutritionData != null) {
+        print(
+          'Food="${nutritionData.foodName}", serving="${nutritionData.servingSize}", '
+          'cal=${nutritionData.calories}, p=${nutritionData.protein}, c=${nutritionData.carbs}, f=${nutritionData.fat}',
+        );
+      }
 
       if (nutritionData == null) {
         _showErrorSnackBar('Could not fetch nutrition data. Please try again.');
@@ -105,10 +120,27 @@ class _NutritionPageState extends State<NutritionPage> {
         return;
       }
 
-      // Save to database
+      bool badNum(double v) => v.isNaN || v.isInfinite || v < 0;
+      final foodName = nutritionData.foodName.trim();
+      final serving = nutritionData.servingSize.trim();
+
+      if (foodName.isEmpty ||
+          badNum(nutritionData.calories) ||
+          badNum(nutritionData.protein) ||
+          badNum(nutritionData.carbs) ||
+          badNum(nutritionData.fat) ||
+          (nutritionData.calories <= 0 &&
+              nutritionData.protein <= 0 &&
+              nutritionData.carbs <= 0 &&
+              nutritionData.fat <= 0)) {
+        _showErrorSnackBar('Nutrition data looks invalid. Try a different food.');
+        setState(() => isCalculating = false);
+        return;
+      }
+
       final success = await _supabaseService.logMeal(
-        foodName: nutritionData.foodName,
-        servingSize: nutritionData.servingSize,
+        foodName: foodName,
+        servingSize: serving.isEmpty ? '1 serving' : serving,
         calories: nutritionData.calories,
         protein: nutritionData.protein,
         carbs: nutritionData.carbs,
@@ -116,34 +148,19 @@ class _NutritionPageState extends State<NutritionPage> {
         activityDate: DateTime.now(),
       );
 
-      if (success) {
-        // Update UI
-        setState(() {
-          caloriesValue += nutritionData.calories;
-          proteinValue += nutritionData.protein;
-          carbsValue += nutritionData.carbs;
-          fatValue += nutritionData.fat;
-
-          foodLog.insert(0, {
-            'food_name': nutritionData.foodName,
-            'serving_size': nutritionData.servingSize,
-            'calories': nutritionData.calories,
-            'protein_g': nutritionData.protein,
-            'carbs_g': nutritionData.carbs,
-            'fat_g': nutritionData.fat,
-          });
-
-          _foodController.clear();
-          isCalculating = false;
-        });
-
-        _showSuccessSnackBar('Meal added successfully!');
-      } else {
+      if (!success) {
         setState(() => isCalculating = false);
         _showErrorSnackBar('Failed to save meal');
+        return;
       }
+
+      _foodController.clear();
+      await _loadTodayData();
+
+      setState(() => isCalculating = false);
+      _showSuccessSnackBar('Meal added successfully!');
     } catch (e) {
-      print('Error adding meal: $e');
+      print('Error in _addMeal: $e');
       setState(() => isCalculating = false);
       _showErrorSnackBar('An error occurred. Please try again.');
     }
@@ -225,7 +242,6 @@ class _NutritionPageState extends State<NutritionPage> {
                   color: Colors.orange,
                   onTap: () {
                     Navigator.pop(context);
-                    // TODO: Navigate to exercise input screen
                   },
                 ),
               ],
@@ -288,7 +304,6 @@ class _NutritionPageState extends State<NutritionPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Back Button with Stack
                       Stack(
                         children: [
                           Positioned(
@@ -332,8 +347,6 @@ class _NutritionPageState extends State<NutritionPage> {
                         ],
                       ),
                       const SizedBox(height: 24),
-
-                      // Nutrition Cards Grid
                       Row(
                         children: [
                           Expanded(
@@ -382,8 +395,6 @@ class _NutritionPageState extends State<NutritionPage> {
                         ],
                       ),
                       const SizedBox(height: 16),
-
-                      // Set new limits link
                       Center(
                         child: TextButton(
                           onPressed: _showSetLimitsDialog,
@@ -398,8 +409,6 @@ class _NutritionPageState extends State<NutritionPage> {
                         ),
                       ),
                       const SizedBox(height: 24),
-
-                      // Add Meal Section
                       Container(
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
@@ -480,8 +489,6 @@ class _NutritionPageState extends State<NutritionPage> {
                         ),
                       ),
                       const SizedBox(height: 32),
-
-                      // Food Log Section
                       Text(
                         'Food Log',
                         style: GoogleFonts.caveat(
@@ -491,8 +498,6 @@ class _NutritionPageState extends State<NutritionPage> {
                         ),
                       ),
                       const SizedBox(height: 16),
-
-                      // Food Log Items
                       if (foodLog.isEmpty)
                         Center(
                           child: Padding(
@@ -507,17 +512,19 @@ class _NutritionPageState extends State<NutritionPage> {
                           ),
                         )
                       else
-                        ...foodLog.map((meal) => Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: _buildFoodLogItem(
-                                meal['food_name'],
-                                meal['serving_size'],
-                                (meal['calories'] as num).toInt(),
-                                (meal['protein_g'] as num).toInt(),
-                                (meal['carbs_g'] as num).toInt(),
-                                (meal['fat_g'] as num).toInt(),
-                              ),
-                            )),
+                        ...foodLog.map(
+                          (meal) => Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: _buildFoodLogItem(
+                              (meal['food_name'] ?? '').toString(),
+                              (meal['serving_size'] ?? '').toString(),
+                              _toInt(meal['calories']),
+                              _toInt(meal['protein_g']),
+                              _toInt(meal['carbs_g']),
+                              _toInt(meal['fat_g']),
+                            ),
+                          ),
+                        ),
                       const SizedBox(height: 100),
                     ],
                   ),
@@ -600,7 +607,7 @@ class _NutritionPageState extends State<NutritionPage> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(4),
                   child: LinearProgressIndicator(
-                    value: progress.clamp(0.0, 1.0),
+                    value: progress.isNaN ? 0 : progress.clamp(0.0, 1.0),
                     backgroundColor: Colors.black.withOpacity(0.1),
                     valueColor: AlwaysStoppedAnimation<Color>(progressColor),
                     minHeight: 6,
@@ -609,7 +616,7 @@ class _NutritionPageState extends State<NutritionPage> {
               ),
               const SizedBox(width: 8),
               Text(
-                '${(progress * 100).toInt()}%',
+                '${((progress.isNaN ? 0 : progress) * 100).toInt()}%',
                 style: GoogleFonts.roboto(
                   color: Colors.black54,
                   fontSize: 12,
@@ -762,12 +769,14 @@ class _NutritionPageState extends State<NutritionPage> {
           ),
           ElevatedButton(
             onPressed: () async {
-              final newCalories = double.tryParse(caloriesController.text) ?? caloriesLimit;
-              final newProtein = double.tryParse(proteinController.text) ?? proteinTarget;
-              final newCarbs = double.tryParse(carbsController.text) ?? carbsTarget;
+              final newCalories =
+                  double.tryParse(caloriesController.text) ?? caloriesLimit;
+              final newProtein =
+                  double.tryParse(proteinController.text) ?? proteinTarget;
+              final newCarbs =
+                  double.tryParse(carbsController.text) ?? carbsTarget;
               final newFat = double.tryParse(fatController.text) ?? fatTarget;
 
-              // Save to database
               final success = await _goalsService.updateUserGoals(
                 caloriesGoal: newCalories.toInt(),
                 proteinGoal: newProtein.toInt(),
