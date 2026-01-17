@@ -38,7 +38,7 @@ class ExerciseService {
 
     final res = await _exerciseDbGet(uri);
 
-    if (res.statusCode != 200) {
+    if (res.statusCode != 180) {
       throw Exception(
         'Failed to fetch exercises for "$bodyPart": ${res.statusCode}',
       );
