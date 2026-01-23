@@ -1,23 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:ui'; // For ImageFilter
-
-// --- Keep your existing service imports ---
-import 'home_page.dart'; 
+import 'home_page.dart';
 import 'water_reminder.dart';
 import 'personalized_exercise_screen.dart';
 import 'services/supabase_nutrition_service.dart';
 import 'services/user_goals_service.dart';
-import 'services/fatsecret_nutrition_service.dart';
+import 'services/groq_service.dart';
 
 // --- GLOSSY DESIGN CONSTANTS ---
-const Color kDarkTeal = Color(0xFF132F38); 
-const Color kDarkSlate = Color(0xFF0F172A); 
-const Color kCardSurface = Color(0xFF1E293B); 
-const Color kGlassBorder = Color(0x33FFFFFF); 
-const Color kGlassBase = Color(0x1AFFFFFF); 
-const Color kAccentCyan = Color(0xFF22D3EE); 
-const Color kAccentBlue = Color(0xFF3B82F6); 
+const Color kDarkTeal = Color(0xFF132F38);
+const Color kDarkSlate = Color(0xFF0F172A);
+const Color kCardSurface = Color(0xFF1E293B);
+const Color kGlassBorder = Color(0x33FFFFFF);
+const Color kGlassBase = Color(0x1AFFFFFF);
+const Color kAccentCyan = Color(0xFF22D3EE);
+const Color kAccentBlue = Color(0xFF3B82F6);
 const Color kTextWhite = Colors.white;
 const Color kTextGrey = Color(0xFF94A3B8);
 
@@ -30,10 +28,10 @@ class NutritionPage extends StatefulWidget {
 
 class _NutritionPageState extends State<NutritionPage> {
   // --- Services ---
-  final FatSecretNutritionService _nutritionService = FatSecretNutritionService();
+  final GroqNutritionService _nutritionService = GroqNutritionService();
   final SupabaseNutritionService _supabaseService = SupabaseNutritionService();
   final UserGoalsService _goalsService = UserGoalsService();
-  
+
   // --- Controllers ---
   final TextEditingController _searchController = TextEditingController();
 
@@ -85,7 +83,7 @@ class _NutritionPageState extends State<NutritionPage> {
     setState(() => isLoading = true);
 
     try {
-      // We wrap this in a try-catch specifically for goals so it defaults to 
+      // We wrap this in a try-catch specifically for goals so it defaults to
       // hardcoded values if the API fails, rather than breaking the whole page.
       try {
         final goalsData = await _goalsService.getUserGoals();
@@ -178,10 +176,14 @@ class _NutritionPageState extends State<NutritionPage> {
 
   // --- GLOSSY DIALOG: SET LIMITS ---
   void _showSetLimitsDialog() {
-    final calController = TextEditingController(text: caloriesLimit.toInt().toString());
-    final proController = TextEditingController(text: proteinTarget.toInt().toString());
-    final carbController = TextEditingController(text: carbsTarget.toInt().toString());
-    final fatController = TextEditingController(text: fatTarget.toInt().toString());
+    final calController =
+        TextEditingController(text: caloriesLimit.toInt().toString());
+    final proController =
+        TextEditingController(text: proteinTarget.toInt().toString());
+    final carbController =
+        TextEditingController(text: carbsTarget.toInt().toString());
+    final fatController =
+        TextEditingController(text: fatTarget.toInt().toString());
 
     showDialog(
       context: context,
@@ -190,10 +192,16 @@ class _NutritionPageState extends State<NutritionPage> {
         child: AlertDialog(
           backgroundColor: kDarkSlate.withOpacity(0.95),
           shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(25),
-              side: const BorderSide(color: kGlassBorder)
+            borderRadius: BorderRadius.circular(25),
+            side: const BorderSide(color: kGlassBorder),
           ),
-          title: const Text("Set Nutrition Goals", style: TextStyle(color: kTextWhite, fontWeight: FontWeight.bold)),
+          title: const Text(
+            "Set Nutrition Goals",
+            style: TextStyle(
+              color: kTextWhite,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -216,9 +224,12 @@ class _NutritionPageState extends State<NutritionPage> {
             ElevatedButton(
               onPressed: () async {
                 // 1. Parse Input Immediately
-                final newCalories = double.tryParse(calController.text) ?? caloriesLimit;
-                final newProtein = double.tryParse(proController.text) ?? proteinTarget;
-                final newCarbs = double.tryParse(carbController.text) ?? carbsTarget;
+                final newCalories =
+                    double.tryParse(calController.text) ?? caloriesLimit;
+                final newProtein =
+                    double.tryParse(proController.text) ?? proteinTarget;
+                final newCarbs =
+                    double.tryParse(carbController.text) ?? carbsTarget;
                 final newFat = double.tryParse(fatController.text) ?? fatTarget;
 
                 // 2. UPDATE UI IMMEDIATELY (Local State)
@@ -243,13 +254,16 @@ class _NutritionPageState extends State<NutritionPage> {
                     fatGoal: newFat.toInt(),
                   );
                 } catch (e) {
-                  debugPrint("Failed to persist goals to DB, but local state is updated.");
+                  debugPrint(
+                      "Failed to persist goals to DB, but local state is updated.");
                 }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: kAccentCyan,
                 foregroundColor: kDarkSlate,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
               child: const Text("Save Goals"),
             ),
@@ -260,18 +274,22 @@ class _NutritionPageState extends State<NutritionPage> {
   }
 
   void _showErrorSnackBar(String message) {
-    if(!mounted) return;
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
           children: [
-            const Icon(Icons.error_outline_rounded, color: Colors.white, size: 20),
+            const Icon(Icons.error_outline_rounded,
+                color: Colors.white, size: 20),
             const SizedBox(width: 12),
-            Expanded(child: Text(message, style: const TextStyle(color: Colors.white))),
+            Expanded(
+              child: Text(message,
+                  style: const TextStyle(color: Colors.white)),
+            ),
           ],
         ),
         backgroundColor: Colors.redAccent.withOpacity(0.9),
-        behavior: SnackBarBehavior.floating, 
+        behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.only(bottom: 120, left: 20, right: 20),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
@@ -292,8 +310,12 @@ class _NutritionPageState extends State<NutritionPage> {
           decoration: InputDecoration(
             filled: true,
             fillColor: Colors.white.withOpacity(0.05),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           ),
         ),
       ],
@@ -307,7 +329,7 @@ class _NutritionPageState extends State<NutritionPage> {
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [kDarkSlate, kDarkTeal], 
+          colors: [kDarkSlate, kDarkTeal],
         ),
       ),
       child: Scaffold(
@@ -316,10 +338,14 @@ class _NutritionPageState extends State<NutritionPage> {
           backgroundColor: Colors.transparent,
           elevation: 0,
           // --- NO BACK BUTTON ---
-          automaticallyImplyLeading: false, 
+          automaticallyImplyLeading: false,
           title: const Text(
             "Nutrition",
-            style: TextStyle(color: kTextWhite, fontWeight: FontWeight.bold, fontSize: 24),
+            style: TextStyle(
+              color: kTextWhite,
+              fontWeight: FontWeight.bold,
+              fontSize: 24,
+            ),
           ),
           centerTitle: true,
         ),
@@ -349,11 +375,15 @@ class _NutritionPageState extends State<NutritionPage> {
                           onEdit: _showSetLimitsDialog,
                         ),
                         const SizedBox(height: 30),
-                        
+
                         // --- FOOD LOG TITLE ---
                         const Text(
                           "Food Log",
-                          style: TextStyle(color: kTextWhite, fontSize: 18, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            color: kTextWhite,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         const SizedBox(height: 15),
 
@@ -370,19 +400,27 @@ class _NutritionPageState extends State<NutritionPage> {
                             textInputAction: TextInputAction.search,
                             onSubmitted: (value) => _addMeal(value),
                             decoration: InputDecoration(
-                              hintText: "Enter food and amount (e.g. '1 apple')",
-                              hintStyle: TextStyle(color: kTextGrey.withOpacity(0.6)),
-                              prefixIcon: isCalculating 
+                              hintText:
+                                  "Enter food and amount (e.g. '1 apple')",
+                              hintStyle:
+                                  TextStyle(color: kTextGrey.withOpacity(0.6)),
+                              prefixIcon: isCalculating
                                   ? const Padding(
                                       padding: EdgeInsets.all(12),
                                       child: SizedBox(
-                                        width: 20, height: 20, 
-                                        child: CircularProgressIndicator(strokeWidth: 2, color: kAccentCyan)
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: kAccentCyan,
+                                        ),
                                       ),
                                     )
-                                  : const Icon(Icons.auto_awesome_rounded, color: kAccentCyan),
+                                  : const Icon(Icons.auto_awesome_rounded,
+                                      color: kAccentCyan),
                               border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 20, vertical: 15),
                             ),
                           ),
                         ),
@@ -392,14 +430,16 @@ class _NutritionPageState extends State<NutritionPage> {
                         if (foodLog.isEmpty)
                           _buildEmptyState()
                         else
-                          ...foodLog.map((meal) => GlossyMealTile(meal: meal)).toList(),
+                          ...foodLog
+                              .map((meal) => GlossyMealTile(meal: meal))
+                              .toList(),
                       ],
                     ),
                   ),
                 ),
               ),
-        ),
-      );  
+      ),
+    );
   }
 
   Widget _buildEmptyState() {
@@ -413,7 +453,8 @@ class _NutritionPageState extends State<NutritionPage> {
       ),
       child: Column(
         children: [
-          Icon(Icons.no_meals_rounded, size: 40, color: kTextGrey.withOpacity(0.5)),
+          Icon(Icons.no_meals_rounded,
+              size: 40, color: kTextGrey.withOpacity(0.5)),
           const SizedBox(height: 10),
           Text(
             "No meals logged today",
@@ -455,15 +496,26 @@ class GlossySummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final progress = goal > 0 ? (consumed / goal).clamp(0.0, 1.0) : 0.0;
 
+    // ---- FIX ONLY: circle fill seam at 100% (no UI change, just rendering) ----
+    final double ringValue =
+        progress >= 1.0 ? 1.0 : (progress + 0.01).clamp(0.0, 1.0);
+    final StrokeCap ringCap =
+        progress >= 1.0 ? StrokeCap.butt : StrokeCap.round;
+    // ------------------------------------------------------------------------
+
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(32),
         // Smooth Solid Surface Color
-        color: kCardSurface.withOpacity(0.6), 
+        color: kCardSurface.withOpacity(0.6),
         border: Border.all(color: kGlassBorder),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 25, offset: const Offset(0, 10)),
+          BoxShadow(
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 25,
+            offset: const Offset(0, 10),
+          ),
         ],
       ),
       child: Column(
@@ -477,7 +529,8 @@ class GlossySummaryCard extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      const Text("Calories", style: TextStyle(color: kTextGrey, fontSize: 14)),
+                      const Text("Calories",
+                          style: TextStyle(color: kTextGrey, fontSize: 14)),
                       const SizedBox(width: 8),
                       GestureDetector(
                         onTap: onEdit,
@@ -487,14 +540,26 @@ class GlossySummaryCard extends StatelessWidget {
                             color: Colors.white.withOpacity(0.1),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.edit_rounded, size: 12, color: kAccentCyan),
+                          child: const Icon(Icons.edit_rounded,
+                              size: 12, color: kAccentCyan),
                         ),
                       )
                     ],
                   ),
                   const SizedBox(height: 4),
-                  Text("$consumed", style: const TextStyle(color: kTextWhite, fontSize: 32, fontWeight: FontWeight.bold)),
-                  Text("/ $goal kcal", style: TextStyle(color: kTextGrey.withOpacity(0.6), fontSize: 14)),
+                  Text(
+                    "$consumed",
+                    style: const TextStyle(
+                      color: kTextWhite,
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    "/ $goal kcal",
+                    style:
+                        TextStyle(color: kTextGrey.withOpacity(0.6), fontSize: 14),
+                  ),
                 ],
               ),
               SizedBox(
@@ -504,26 +569,30 @@ class GlossySummaryCard extends StatelessWidget {
                   alignment: Alignment.center,
                   children: [
                     CircularProgressIndicator(
-                      value: 1.0, 
-                      strokeWidth: 8, 
-                      color: Colors.white.withOpacity(0.05)
+                      value: 1.0,
+                      strokeWidth: 8,
+                      backgroundColor: Colors.transparent,
+                      color: Colors.white.withOpacity(0.05),
                     ),
                     ShaderMask(
                       shaderCallback: (bounds) => const LinearGradient(
                         colors: [kAccentCyan, kAccentBlue],
                         begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter
+                        end: Alignment.bottomCenter,
                       ).createShader(bounds),
                       child: CircularProgressIndicator(
-                        value: progress, 
-                        strokeWidth: 8, 
+                        value: ringValue, // FIX
+                        strokeWidth: 8,
                         color: Colors.white,
-                        strokeCap: StrokeCap.round,
+                        strokeCap: ringCap, // FIX
                       ),
                     ),
                     Text(
                       "${(progress * 100).toInt()}%",
-                      style: const TextStyle(color: kTextWhite, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        color: kTextWhite,
+                        fontWeight: FontWeight.bold,
+                      ),
                     )
                   ],
                 ),
@@ -549,7 +618,8 @@ class GlossySummaryCard extends StatelessWidget {
       children: [
         SizedBox(
           width: 60,
-          child: Text(label, style: const TextStyle(color: kTextGrey, fontSize: 13)),
+          child: Text(label,
+              style: const TextStyle(color: kTextGrey, fontSize: 13)),
         ),
         Expanded(
           child: Stack(
@@ -568,7 +638,13 @@ class GlossySummaryCard extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: color,
                     borderRadius: BorderRadius.circular(4),
-                    boxShadow: [BoxShadow(color: color.withOpacity(0.4), blurRadius: 6, offset: const Offset(0, 2))],
+                    boxShadow: [
+                      BoxShadow(
+                        color: color.withOpacity(0.4),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      )
+                    ],
                   ),
                 ),
               ),
@@ -581,7 +657,11 @@ class GlossySummaryCard extends StatelessWidget {
           child: Text(
             "$value / ${goal}g",
             textAlign: TextAlign.end,
-            style: const TextStyle(color: kTextWhite, fontSize: 13, fontWeight: FontWeight.w600),
+            style: const TextStyle(
+              color: kTextWhite,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
       ],
@@ -600,13 +680,26 @@ class GlossyMealTile extends StatelessWidget {
     IconData icon = Icons.restaurant;
     Color iconColor = kAccentBlue;
 
-    if (name.contains('break')) { icon = Icons.wb_sunny_rounded; iconColor = Colors.orange; }
-    else if (name.contains('lunch')) { icon = Icons.wb_twilight_rounded; iconColor = Colors.yellow; }
-    else if (name.contains('dinner')) { icon = Icons.nights_stay_rounded; iconColor = Colors.indigoAccent; }
-    else if (name.contains('snack')) { icon = Icons.cookie_rounded; iconColor = Colors.pinkAccent; }
+    if (name.contains('break')) {
+      icon = Icons.wb_sunny_rounded;
+      iconColor = Colors.orange;
+    } else if (name.contains('lunch')) {
+      icon = Icons.wb_twilight_rounded;
+      iconColor = Colors.yellow;
+    } else if (name.contains('dinner')) {
+      icon = Icons.nights_stay_rounded;
+      iconColor = Colors.indigoAccent;
+    } else if (name.contains('snack')) {
+      icon = Icons.cookie_rounded;
+      iconColor = Colors.pinkAccent;
+    }
     // Add specific checks for common food items to make icons more relevant
-    else if (name.contains('egg') || name.contains('chicken') || name.contains('beef')) { icon = Icons.restaurant_menu_rounded; }
-    else if (name.contains('water') || name.contains('drink')) { icon = Icons.local_drink_rounded; iconColor = Colors.cyan; }
+    else if (name.contains('egg') || name.contains('chicken') || name.contains('beef')) {
+      icon = Icons.restaurant_menu_rounded;
+    } else if (name.contains('water') || name.contains('drink')) {
+      icon = Icons.local_drink_rounded;
+      iconColor = Colors.cyan;
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -633,12 +726,20 @@ class GlossyMealTile extends StatelessWidget {
               children: [
                 Text(
                   meal['food_name'] ?? 'Unknown Meal',
-                  style: const TextStyle(color: kTextWhite, fontWeight: FontWeight.bold, fontSize: 15),
+                  style: const TextStyle(
+                    color: kTextWhite,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   "${meal['calories']} kcal • ${meal['serving_size']}",
-                  style: TextStyle(color: kAccentCyan.withOpacity(0.8), fontSize: 12, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                    color: kAccentCyan.withOpacity(0.8),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
@@ -646,9 +747,12 @@ class GlossyMealTile extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text("P: ${meal['protein_g']}g", style: TextStyle(color: kTextGrey, fontSize: 11)),
-              Text("C: ${meal['carbs_g']}g", style: TextStyle(color: kTextGrey, fontSize: 11)),
-              Text("F: ${meal['fat_g']}g", style: TextStyle(color: kTextGrey, fontSize: 11)),
+              Text("P: ${meal['protein_g']}g",
+                  style: TextStyle(color: kTextGrey, fontSize: 11)),
+              Text("C: ${meal['carbs_g']}g",
+                  style: TextStyle(color: kTextGrey, fontSize: 11)),
+              Text("F: ${meal['fat_g']}g",
+                  style: TextStyle(color: kTextGrey, fontSize: 11)),
             ],
           )
         ],

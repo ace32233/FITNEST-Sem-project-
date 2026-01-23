@@ -2,23 +2,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'intro_page.dart';
-import 'gender_page.dart';
-import 'home_page.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter/rendering.dart';
 
+import 'intro_page.dart';
+import 'gender_page.dart';
+import 'home_page.dart';
 
 void main() async {
+  // Keep your debug flags
   debugPaintBaselinesEnabled = false;
   debugPaintSizeEnabled = false;
   debugPaintPointersEnabled = false;
   debugRepaintRainbowEnabled = false;
+
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Load environment variables
   await dotenv.load(fileName: ".env");
-  
+
   // Get Supabase credentials from .env
   final supabaseUrl = dotenv.env['SUPABASE_URL'];
   final supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'];
@@ -58,7 +60,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// Auth Gate - Determines where to route user
+/// Auth Gate - Determines where to route user
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
 
@@ -73,7 +75,19 @@ class _AuthGateState extends State<AuthGate> {
   @override
   void initState() {
     super.initState();
-    _checkAuthAndOnboarding();
+
+    // Prevent doing network work before first paint.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkAuthAndOnboarding();
+    });
+  }
+
+  void _go(Widget dest) {
+    if (!mounted) return;
+    setState(() {
+      _destination = dest;
+      _isLoading = false;
+    });
   }
 
   Future<void> _checkAuthAndOnboarding() async {
@@ -83,10 +97,7 @@ class _AuthGateState extends State<AuthGate> {
 
       if (session == null) {
         // Not logged in - show intro page
-        setState(() {
-          _destination = const IntroPage();
-          _isLoading = false;
-        });
+        _go(const IntroPage());
         return;
       }
 
@@ -107,27 +118,18 @@ class _AuthGateState extends State<AuthGate> {
 
       if (fitnessResponse == null) {
         // No fitness data - first time user, show onboarding
-        setState(() {
-          _destination = const GenderScreen();
-          _isLoading = false;
-        });
+        _go(const GenderScreen());
       } else {
         // Has fitness data - returning user, go to home
-        setState(() {
-          _destination = const HomePage();
-          _isLoading = false;
-        });
+        _go(const HomePage());
       }
     } catch (e) {
       debugPrint('Error checking auth: $e');
-      setState(() {
-        _destination = const IntroPage();
-        _isLoading = false;
-      });
+      _go(const IntroPage());
     }
   }
 
-  // Ensure profile exists for the user
+  /// Ensure profile exists for the user
   Future<void> _ensureProfileExists(User user) async {
     try {
       final supabase = Supabase.instance.client;
@@ -159,7 +161,9 @@ class _AuthGateState extends State<AuthGate> {
     if (_isLoading) {
       return const Scaffold(
         backgroundColor: Color(0xFF0A2852),
-        body: Center(child: CircularProgressIndicator(color: Colors.white)),
+        body: Center(
+          child: CircularProgressIndicator(color: Colors.white),
+        ),
       );
     }
 
