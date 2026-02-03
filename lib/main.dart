@@ -17,9 +17,13 @@ void main() async {
   debugRepaintRainbowEnabled = false;
 
   WidgetsFlutterBinding.ensureInitialized();
-
   // Load environment variables
   await dotenv.load(fileName: ".env");
+  print("ENV LOADED => ${dotenv.env}");
+  print("KEY1 => ${dotenv.env['EXERCISE_API_KEY_1']}");
+
+
+
 
   // Get Supabase credentials from .env
   final supabaseUrl = dotenv.env['SUPABASE_URL'];

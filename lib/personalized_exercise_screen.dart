@@ -1,16 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
-import 'dart:ui'; // Added for ImageFilter
+import 'dart:ui';
+import 'dart:typed_data';
+import '/services/exercise_service.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// --- GLOSSY DESIGN CONSTANTS ---
 const Color kDarkTeal = Color(0xFF132F38);
 const Color kDarkSlate = Color(0xFF0F172A);
 const Color kGlassBorder = Color(0x1AFFFFFF);
@@ -20,9 +20,6 @@ const Color kAccentBlue = Color(0xFF3B82F6);
 const Color kTextWhite = Colors.white;
 const Color kTextGrey = Color(0xFF94A3B8);
 
-/// ------------------------------
-/// Models
-/// ------------------------------
 class UserProfile {
   final int age;
   final double weightKg;
@@ -85,18 +82,15 @@ class Exercise {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'bodyPart': bodyPart,
-        'target': target,
-        'equipment': equipment,
-        'gifUrl': gifUrl,
-      };
+    'id': id,
+    'name': name,
+    'bodyPart': bodyPart,
+    'target': target,
+    'equipment': equipment,
+    'gifUrl': gifUrl,
+  };
 }
 
-/// ------------------------------
-/// Helpers
-/// ------------------------------
 int _asInt(dynamic v) {
   if (v == null) return 0;
   if (v is int) return v;
@@ -125,25 +119,24 @@ String levelFromBmiAndAge({required double bmi, required int age}) {
   return 'beginner';
 }
 
-String _exerciseGifUrl(String exerciseId, {int resolution = 180}) {
-  final id = exerciseId.trim();
-  if (id.isEmpty) return '';
-  if (resolution != 180) resolution = 180;
-
-  return Uri.https(
-    'exercisedb.p.rapidapi.com',
-    '/image',
-    {
-      'resolution': '180',
-      'exerciseId': id,
-    },
-  ).toString();
+String _exerciseApiKeyAny() {
+  return (dotenv.env['EXERCISE_API_KEY'] ??
+          dotenv.env['EXERCISE_API_KEY_1'] ??
+          dotenv.env['EXERCISE_API_KEY_2'] ??
+          dotenv.env['EXERCISE_API_KEY_3'] ??
+          '')
+      .trim();
 }
 
-/// ------------------------------
-/// Supabase Profile
-/// ------------------------------
-final userProfileProvider = FutureProvider.autoDispose<UserProfile>((ref) async {
+String _exerciseApiHost() {
+  return (dotenv.env['EXERCISE_API_HOST'] ?? 'exercisedb.p.rapidapi.com')
+      .trim();
+}
+
+
+final userProfileProvider = FutureProvider.autoDispose<UserProfile>((
+  ref,
+) async {
   final user = Supabase.instance.client.auth.currentUser;
   if (user == null) throw Exception('User not logged in.');
 
@@ -153,9 +146,7 @@ final userProfileProvider = FutureProvider.autoDispose<UserProfile>((ref) async 
       .eq('id', user.id)
       .maybeSingle();
 
-  if (fitness == null) {
-    throw Exception('No fitness profile found.');
-  }
+  if (fitness == null) throw Exception('No fitness profile found.');
 
   final age = _asInt(fitness['age']);
   final weightKg = _asDouble(fitness['weight_kg']);
@@ -180,20 +171,23 @@ final personalizedLevelProvider = Provider<String>((ref) {
   return levelFromBmiAndAge(bmi: p.bmi, age: p.age);
 });
 
-/// ------------------------------
-/// Muscle Groups (UI)
-/// ------------------------------
 enum MuscleGroup { back, chest, legs, arms, cardio, core }
 
 extension MuscleGroupX on MuscleGroup {
   String get label {
     switch (this) {
-      case MuscleGroup.back: return 'Back';
-      case MuscleGroup.chest: return 'Chest';
-      case MuscleGroup.legs: return 'Legs';
-      case MuscleGroup.arms: return 'Arms';
-      case MuscleGroup.cardio: return 'Cardio';
-      case MuscleGroup.core: return 'Core';
+      case MuscleGroup.back:
+        return 'Back';
+      case MuscleGroup.chest:
+        return 'Chest';
+      case MuscleGroup.legs:
+        return 'Legs';
+      case MuscleGroup.arms:
+        return 'Arms';
+      case MuscleGroup.cardio:
+        return 'Cardio';
+      case MuscleGroup.core:
+        return 'Core';
     }
   }
 }
@@ -209,50 +203,17 @@ const Map<MuscleGroup, List<String>> groupToBodyParts = {
 
 final selectedGroupProvider = StateProvider<MuscleGroup?>((ref) => null);
 
-/// ------------------------------
-/// RapidAPI ExerciseDB
-/// ------------------------------
-Future<http.Response> _exerciseDbGet(Uri uri) async {
-  final apiKey = dotenv.env['EXERCISE_API_KEY'] ?? '';
-  final host = dotenv.env['EXERCISE_API_HOST'] ?? 'exercisedb.p.rapidapi.com';
-
-  if (apiKey.trim().isEmpty) {
-    throw Exception('Exercise API credentials not found.');
-  }
-
-  final res = await http.get(
-    uri,
-    headers: {
-      'X-RapidAPI-Key': apiKey,
-      'X-RapidAPI-Host': host,
-    },
-  );
-
-  if (res.statusCode == 429) {
-    throw Exception('429: Rate limit exceeded on RapidAPI.');
-  }
-  return res;
-}
-
 Future<List<Exercise>> _fetchExercisesForBodyPart(String bodyPart) async {
-  final host = dotenv.env['EXERCISE_API_HOST'] ?? 'exercisedb.p.rapidapi.com';
-  final uri = Uri.https(host, '/exercises/bodyPart/$bodyPart');
-
-  final res = await _exerciseDbGet(uri);
-  if (res.statusCode != 200) {
-    throw Exception('Failed to fetch exercises: ${res.statusCode}');
-  }
-
-  final decoded = json.decode(res.body);
-  if (decoded is! List) throw Exception('Unexpected response format');
-
-  return decoded
-      .map((e) => Exercise.fromJson(e as Map<String, dynamic>))
+  final list = await ExerciseService.fetchExercisesForBodyPart(bodyPart);
+  return list
+      .map((m) => Exercise.fromJson(m))
       .where((e) => e.name.trim().isNotEmpty && e.id.trim().isNotEmpty)
       .toList();
 }
 
-final exercisesForGroupProvider = FutureProvider.autoDispose<List<Exercise>>((ref) async {
+final exercisesForGroupProvider = FutureProvider.autoDispose<List<Exercise>>((
+  ref,
+) async {
   final group = ref.watch(selectedGroupProvider);
   if (group == null) return const [];
 
@@ -268,7 +229,9 @@ final exercisesForGroupProvider = FutureProvider.autoDispose<List<Exercise>>((re
   final seen = <String>{};
   final unique = <Exercise>[];
   for (final ex in merged) {
-    final key = ex.id.isNotEmpty ? ex.id : '${ex.name}_${ex.bodyPart}_${ex.target}_${ex.equipment}';
+    final key = ex.id.isNotEmpty
+        ? ex.id
+        : '${ex.name}_${ex.bodyPart}_${ex.target}_${ex.equipment}';
     if (seen.add(key)) unique.add(ex);
   }
 
@@ -276,11 +239,8 @@ final exercisesForGroupProvider = FutureProvider.autoDispose<List<Exercise>>((re
   return unique;
 });
 
-/// ------------------------------
-/// Local history (SharedPreferences)
-/// ------------------------------
 class WorkoutHistory {
-  final String date; 
+  final String date;
   final bool completed;
   final int durationMinutes;
   final String muscleGroup;
@@ -295,12 +255,12 @@ class WorkoutHistory {
   });
 
   Map<String, dynamic> toJson() => {
-        'date': date,
-        'completed': completed,
-        'durationMinutes': durationMinutes,
-        'muscleGroup': muscleGroup,
-        'exerciseIds': exerciseIds,
-      };
+    'date': date,
+    'completed': completed,
+    'durationMinutes': durationMinutes,
+    'muscleGroup': muscleGroup,
+    'exerciseIds': exerciseIds,
+  };
 
   factory WorkoutHistory.fromJson(Map<String, dynamic> json) {
     return WorkoutHistory(
@@ -329,7 +289,8 @@ class HistoryRepo {
     final today = _todayDateKey();
     final entry = decoded[today];
     if (entry is Map<String, dynamic>) return WorkoutHistory.fromJson(entry);
-    if (entry is Map) return WorkoutHistory.fromJson(Map<String, dynamic>.from(entry));
+    if (entry is Map)
+      return WorkoutHistory.fromJson(Map<String, dynamic>.from(entry));
     return null;
   }
 
@@ -349,13 +310,12 @@ class HistoryRepo {
 }
 
 final historyRepoProvider = Provider<HistoryRepo>((ref) => HistoryRepo());
-final todayHistoryProvider = FutureProvider.autoDispose<WorkoutHistory?>((ref) async {
+final todayHistoryProvider = FutureProvider.autoDispose<WorkoutHistory?>((
+  ref,
+) async {
   return ref.read(historyRepoProvider).getToday();
 });
 
-/// ------------------------------
-/// Workout session
-/// ------------------------------
 @immutable
 class WorkoutState {
   final List<Exercise> workout;
@@ -400,12 +360,12 @@ class WorkoutState {
   }
 
   static WorkoutState empty() => const WorkoutState(
-        workout: [],
-        index: 0,
-        completedIds: {},
-        startedAt: null,
-        muscleGroup: null,
-      );
+    workout: [],
+    index: 0,
+    completedIds: {},
+    startedAt: null,
+    muscleGroup: null,
+  );
 }
 
 class WorkoutController extends StateNotifier<WorkoutState> {
@@ -456,7 +416,9 @@ class WorkoutController extends StateNotifier<WorkoutState> {
 
   void goNext() {
     if (!state.hasWorkout) return;
-    state = state.copyWith(index: min(state.workout.length - 1, state.index + 1));
+    state = state.copyWith(
+      index: min(state.workout.length - 1, state.index + 1),
+    );
   }
 
   static List<Exercise> _pickUniqueRandom(List<Exercise> source, int count) {
@@ -508,19 +470,25 @@ class WorkoutController extends StateNotifier<WorkoutState> {
       });
     } else {
       final prevGoals = _asInt(existingDay['goals_met']);
-      final prevWorkoutMinutes = _asInt(existingDay['workout_duration_minutes']);
-      await Supabase.instance.client.from('daily_activities').update({
-        'workout_completed': true,
-        'workout_duration_minutes': max(prevWorkoutMinutes, minutes),
-        'is_active_day': true,
-        'goals_met': prevGoals + 1,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', existingDay['id']);
+      final prevWorkoutMinutes = _asInt(
+        existingDay['workout_duration_minutes'],
+      );
+      await Supabase.instance.client
+          .from('daily_activities')
+          .update({
+            'workout_completed': true,
+            'workout_duration_minutes': max(prevWorkoutMinutes, minutes),
+            'is_active_day': true,
+            'goals_met': prevGoals + 1,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', existingDay['id']);
     }
 
     final exercisesJson = state.workout
-        .map((e) => e.toJson()..['gifUrl'] = _exerciseGifUrl(e.id))
-        .toList();
+    .map((e) => e.toJson())
+    .toList();
+
 
     final existingLog = await Supabase.instance.client
         .from('workout_logs')
@@ -540,14 +508,17 @@ class WorkoutController extends StateNotifier<WorkoutState> {
         'exercises': exercisesJson,
       });
     } else {
-      await Supabase.instance.client.from('workout_logs').update({
-        'muscle_group': groupLabel,
-        'duration_minutes': minutes,
-        'total_exercises': state.workout.length,
-        'completed_exercises': state.completedIds.length,
-        'exercises': exercisesJson,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', existingLog['id']);
+      await Supabase.instance.client
+          .from('workout_logs')
+          .update({
+            'muscle_group': groupLabel,
+            'duration_minutes': minutes,
+            'total_exercises': state.workout.length,
+            'completed_exercises': state.completedIds.length,
+            'exercises': exercisesJson,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', existingLog['id']);
     }
 
     _ref.invalidate(todayHistoryProvider);
@@ -556,12 +527,9 @@ class WorkoutController extends StateNotifier<WorkoutState> {
 
 final workoutControllerProvider =
     StateNotifierProvider<WorkoutController, WorkoutState>(
-  (ref) => WorkoutController(ref),
-);
+      (ref) => WorkoutController(ref),
+    );
 
-/// ------------------------------
-/// UI: Personalized Exercise Screen
-/// ------------------------------
 class PersonalizedExerciseScreen extends ConsumerWidget {
   const PersonalizedExerciseScreen({super.key});
 
@@ -573,7 +541,8 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
     final workout = ref.watch(workoutControllerProvider);
     final todayHistoryAsync = ref.watch(todayHistoryProvider);
 
-    final bool alreadyDoneToday = todayHistoryAsync.valueOrNull?.completed ?? false;
+    final bool alreadyDoneToday =
+        todayHistoryAsync.valueOrNull?.completed ?? false;
 
     return Container(
       decoration: const BoxDecoration(
@@ -588,20 +557,18 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
         appBar: AppBar(
           elevation: 0,
           backgroundColor: Colors.transparent,
-          // --- CHANGE: REMOVED BACK BUTTON ---
-          automaticallyImplyLeading: false, // Ensures no back button shows
+          automaticallyImplyLeading: false,
           title: const Text(
             'Personalized Exercises',
             style: TextStyle(color: kTextWhite, fontWeight: FontWeight.bold),
           ),
-          centerTitle: true, // Center the title since there's no leading icon
+          centerTitle: true,
         ),
         body: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 1. Profile Card
               profileAsync.when(
                 data: (p) => _ProfileCard(
                   age: p.age,
@@ -609,17 +576,20 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
                   level: ref.watch(personalizedLevelProvider),
                 ),
                 loading: () => const _SkeletonBox(height: 56),
-                error: (e, _) => Text('Profile error: $e', style: const TextStyle(color: Colors.red)),
+                error: (e, _) => Text(
+                  'Profile error: $e',
+                  style: const TextStyle(color: Colors.red),
+                ),
               ),
               const SizedBox(height: 12),
-
-              // 2. Today Status
               todayHistoryAsync.when(
                 data: (h) {
-                  if (h == null || h.completed != true) return const SizedBox.shrink();
+                  if (h == null || h.completed != true)
+                    return const SizedBox.shrink();
                   return _InfoBanner(
                     icon: Icons.check_circle,
-                    text: 'Today completed • ${h.durationMinutes} min • ${h.muscleGroup}',
+                    text:
+                        'Today completed • ${h.durationMinutes} min • ${h.muscleGroup}',
                     color: kAccentCyan,
                   );
                 },
@@ -627,11 +597,13 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
                 error: (_, __) => const SizedBox.shrink(),
               ),
               const SizedBox(height: 10),
-
-              // 3. Muscle Group Selector
               const Text(
                 'Choose muscle group',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: kTextWhite),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: kTextWhite,
+                ),
               ),
               const SizedBox(height: 10),
               SizedBox(
@@ -650,9 +622,14 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
                       },
                       borderRadius: BorderRadius.circular(22),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 10,
+                        ),
                         decoration: BoxDecoration(
-                          color: isSelected ? kAccentCyan.withOpacity(0.8) : kCardSurface.withOpacity(0.6),
+                          color: isSelected
+                              ? kAccentCyan.withOpacity(0.8)
+                              : kCardSurface.withOpacity(0.6),
                           borderRadius: BorderRadius.circular(22),
                           border: Border.all(
                             color: isSelected ? kAccentCyan : kGlassBorder,
@@ -672,21 +649,25 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 14),
-
-              // 4. Exercise List Header
               Text(
-                selectedGroup == null ? 'Exercises' : 'Exercises for: ${selectedGroup.label}',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kTextWhite),
+                selectedGroup == null
+                    ? 'Exercises'
+                    : 'Exercises for: ${selectedGroup.label}',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: kTextWhite,
+                ),
               ),
               const SizedBox(height: 10),
-
               if (workout.hasWorkout)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
-                  child: _WorkoutProgress(done: workout.done, total: workout.total),
+                  child: _WorkoutProgress(
+                    done: workout.done,
+                    total: workout.total,
+                  ),
                 ),
-
-              // 5. Exercise List
               Expanded(
                 child: exercisesAsync.when(
                   data: (items) {
@@ -698,18 +679,30 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
                         ),
                       );
                     }
-                    if (items.isEmpty) return const Center(child: Text('No exercises found.', style: TextStyle(color: kTextGrey)));
-
+                    if (items.isEmpty) {
+                      return const Center(
+                        child: Text(
+                          'No exercises found.',
+                          style: TextStyle(color: kTextGrey),
+                        ),
+                      );
+                    }
                     return ListView.separated(
                       itemCount: items.length,
-                      // Preload a bit more content
-                      cacheExtent: 1000, 
+                      cacheExtent: 1000,
                       separatorBuilder: (_, __) => const SizedBox(height: 12),
                       itemBuilder: (context, i) => _ExerciseCard(ex: items[i]),
                     );
                   },
-                  loading: () => const Center(child: CircularProgressIndicator(color: kAccentCyan)),
-                  error: (e, _) => Center(child: Text('Exercises error: $e', style: const TextStyle(color: Colors.red))),
+                  loading: () => const Center(
+                    child: CircularProgressIndicator(color: kAccentCyan),
+                  ),
+                  error: (e, _) => Center(
+                    child: Text(
+                      'Exercises error: $e',
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -728,13 +721,16 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
                     if (workout.hasWorkout && !workout.isFinished)
                       _InfoBanner(
                         icon: Icons.fitness_center,
-                        text: 'Workout in progress • ${workout.done}/${workout.total} done',
+                        text:
+                            'Workout in progress • ${workout.done}/${workout.total} done',
                         actionText: 'Open',
                         color: kAccentBlue,
                         onAction: () {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(builder: (_) => const WorkoutPlayerScreen()),
+                            MaterialPageRoute(
+                              builder: (_) => const WorkoutPlayerScreen(),
+                            ),
                           );
                         },
                       ),
@@ -750,10 +746,13 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
                       height: 54,
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: (workout.isFinished || alreadyDoneToday)
+                          backgroundColor:
+                              (workout.isFinished || alreadyDoneToday)
                               ? Colors.grey.withOpacity(0.3)
                               : kAccentCyan,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
                           foregroundColor: kDarkSlate,
                         ),
                         onPressed: (workout.isFinished || alreadyDoneToday)
@@ -763,27 +762,38 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
                                   if (!canStart) {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(
-                                        content: Text('Pick a group with at least 3 exercises.'),
+                                        content: Text(
+                                          'Pick a group with at least 3 exercises.',
+                                        ),
                                         backgroundColor: Colors.redAccent,
                                       ),
                                     );
                                     return;
                                   }
-                                  ref.read(workoutControllerProvider.notifier).startFromSource(
+                                  ref
+                                      .read(workoutControllerProvider.notifier)
+                                      .startFromSource(
                                         items,
                                         group: selectedGroup!,
                                       );
                                 }
                                 Navigator.push(
                                   context,
-                                  MaterialPageRoute(builder: (_) => const WorkoutPlayerScreen()),
+                                  MaterialPageRoute(
+                                    builder: (_) => const WorkoutPlayerScreen(),
+                                  ),
                                 );
                               },
                         child: Text(
                           alreadyDoneToday
                               ? 'Come back tomorrow!'
-                              : (workout.hasWorkout ? 'Continue Workout' : 'Start Workout (3-6)'),
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                              : (workout.hasWorkout
+                                    ? 'Continue Workout'
+                                    : 'Start Workout (3-6)'),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                     ),
@@ -792,7 +802,9 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
               },
               loading: () => const SizedBox(
                 height: 54,
-                child: Center(child: CircularProgressIndicator(color: kAccentCyan)),
+                child: Center(
+                  child: CircularProgressIndicator(color: kAccentCyan),
+                ),
               ),
               error: (_, __) => const SizedBox.shrink(),
             ),
@@ -803,9 +815,6 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
   }
 }
 
-/// ------------------------------
-/// Workout Player
-/// ------------------------------
 class WorkoutPlayerScreen extends ConsumerWidget {
   const WorkoutPlayerScreen({super.key});
 
@@ -833,8 +842,13 @@ class WorkoutPlayerScreen extends ConsumerWidget {
             onPressed: () => Navigator.pop(context),
           ),
           title: Text(
-            workout.isFinished ? 'Completed' : 'Workout (${workout.done}/${workout.total})',
-            style: const TextStyle(color: kTextWhite, fontWeight: FontWeight.bold),
+            workout.isFinished
+                ? 'Completed'
+                : 'Workout (${workout.done}/${workout.total})',
+            style: const TextStyle(
+              color: kTextWhite,
+              fontWeight: FontWeight.bold,
+            ),
           ),
           actions: [
             TextButton(
@@ -850,19 +864,22 @@ class WorkoutPlayerScreen extends ConsumerWidget {
           padding: const EdgeInsets.all(16),
           child: workout.hasWorkout
               ? (workout.isFinished
-                  ? _CompletedView(onDone: () => Navigator.pop(context))
-                  : _WorkoutStepView(
-                      exercise: cur!,
-                      isDone: workout.completedIds.contains(cur.id),
-                      onPrev: controller.goPrev,
-                      onNext: controller.goNext,
-                      onComplete: controller.completeCurrentAndNext,
-                    ))
+                    ? _CompletedView(onDone: () => Navigator.pop(context))
+                    : _WorkoutStepView(
+                        exercise: cur!,
+                        isDone: workout.completedIds.contains(cur.id),
+                        onPrev: controller.goPrev,
+                        onNext: controller.goNext,
+                        onComplete: controller.completeCurrentAndNext,
+                      ))
               : const Center(
                   child: Text(
                     'No workout started.\nGo back and press Start Workout.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontWeight: FontWeight.bold, color: kTextWhite),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: kTextWhite,
+                    ),
                   ),
                 ),
         ),
@@ -888,16 +905,6 @@ class _WorkoutStepView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final apiKey = dotenv.env['EXERCISE_API_KEY'] ?? '';
-    final apiHost = dotenv.env['EXERCISE_API_HOST'] ?? 'exercisedb.p.rapidapi.com';
-
-    final Map<String, String>? headers = apiKey.isNotEmpty
-        ? {
-            'X-RapidAPI-Key': apiKey,
-            'X-RapidAPI-Host': apiHost,
-          }
-        : null;
-
     return Column(
       children: [
         Container(
@@ -913,17 +920,18 @@ class _WorkoutStepView extends StatelessWidget {
             children: [
               Text(
                 _prettyName(exercise.name),
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kTextWhite),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: kTextWhite,
+                ),
               ),
               const SizedBox(height: 10),
               ClipRRect(
                 borderRadius: BorderRadius.circular(14),
                 child: AspectRatio(
                   aspectRatio: 16 / 10,
-                  child: _ExerciseGif(
-                    url: _exerciseGifUrl(exercise.id, resolution: 180),
-                    headers: headers,
-                  ),
+                  child: _ExerciseGif(exerciseId: exercise.id),
                 ),
               ),
               const SizedBox(height: 12),
@@ -951,7 +959,10 @@ class _WorkoutStepView extends StatelessWidget {
                     Expanded(
                       child: Text(
                         'Tip: Controlled reps, full range of motion.',
-                        style: TextStyle(fontWeight: FontWeight.bold, color: kTextGrey),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: kTextGrey,
+                        ),
                       ),
                     ),
                   ],
@@ -969,7 +980,9 @@ class _WorkoutStepView extends StatelessWidget {
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   side: const BorderSide(color: kGlassBorder),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
                   foregroundColor: kTextWhite,
                 ),
                 child: const Text('Prev'),
@@ -982,7 +995,9 @@ class _WorkoutStepView extends StatelessWidget {
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   side: const BorderSide(color: kGlassBorder),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
                   foregroundColor: kTextWhite,
                 ),
                 child: const Text('Next'),
@@ -998,7 +1013,9 @@ class _WorkoutStepView extends StatelessWidget {
             style: ElevatedButton.styleFrom(
               backgroundColor: isDone ? Colors.green : kAccentCyan,
               foregroundColor: kDarkSlate,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
             ),
             onPressed: onComplete,
             child: Text(
@@ -1012,19 +1029,13 @@ class _WorkoutStepView extends StatelessWidget {
   }
 }
 
-/// ------------------------------
-/// Components with Glossy Design & Fixes
-/// ------------------------------
-
 class _ExerciseGif extends StatelessWidget {
-  final String url;
-  final Map<String, String>? headers;
-
-  const _ExerciseGif({required this.url, this.headers});
+  final String exerciseId;
+  const _ExerciseGif({required this.exerciseId});
 
   @override
   Widget build(BuildContext context) {
-    if (url.trim().isEmpty) {
+    if (exerciseId.trim().isEmpty) {
       return Container(
         color: Colors.black12,
         alignment: Alignment.center,
@@ -1032,31 +1043,55 @@ class _ExerciseGif extends StatelessWidget {
       );
     }
 
-    return Image.network(
-      url,
-      headers: headers,
-      fit: BoxFit.cover,
-      filterQuality: FilterQuality.medium,
-      loadingBuilder: (c, child, progress) {
-        if (progress == null) return child;
-        return Container(
-          color: Colors.black12,
-          alignment: Alignment.center,
-          child: const CircularProgressIndicator(color: kAccentCyan),
-        );
-      },
-      errorBuilder: (_, error, __) {
-        return Container(
-          color: Colors.black12,
-          alignment: Alignment.center,
-          child: const Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.broken_image, color: kTextGrey, size: 32),
-              SizedBox(height: 4),
-              Text('No Preview', style: TextStyle(color: kTextGrey)),
-            ],
-          ),
+    return FutureBuilder<Uint8List>(
+      future: ExerciseService.fetchExerciseGifBytes(
+        exerciseId: exerciseId,
+        resolutionPx: 180, // ✅ forced 180
+      ),
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return Container(
+            color: Colors.black12,
+            alignment: Alignment.center,
+            child: const CircularProgressIndicator(color: kAccentCyan),
+          );
+        }
+
+        final bytes = snap.data;
+        if (bytes == null || bytes.isEmpty || snap.hasError) {
+          return Container(
+            color: Colors.black12,
+            alignment: Alignment.center,
+            child: const Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.broken_image, color: kTextGrey, size: 32),
+                SizedBox(height: 4),
+                Text('No Preview', style: TextStyle(color: kTextGrey)),
+              ],
+            ),
+          );
+        }
+
+        return Image.memory(
+          bytes,
+          fit: BoxFit.cover,
+          filterQuality: FilterQuality.medium,
+          gaplessPlayback: true,
+          errorBuilder: (_, __, ___) {
+            return Container(
+              color: Colors.black12,
+              alignment: Alignment.center,
+              child: const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.broken_image, color: kTextGrey, size: 32),
+                  SizedBox(height: 4),
+                  Text('No Preview', style: TextStyle(color: kTextGrey)),
+                ],
+              ),
+            );
+          },
         );
       },
     );
@@ -1084,7 +1119,11 @@ class _CompletedView extends StatelessWidget {
             const SizedBox(height: 10),
             const Text(
               'Workout Completed!',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: kTextWhite),
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: kTextWhite,
+              ),
             ),
             const SizedBox(height: 6),
             const Text(
@@ -1112,7 +1151,11 @@ class _ProfileCard extends StatelessWidget {
   final double bmi;
   final String level;
 
-  const _ProfileCard({required this.age, required this.bmi, required this.level});
+  const _ProfileCard({
+    required this.age,
+    required this.bmi,
+    required this.level,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1141,12 +1184,19 @@ class _ProfileCard extends StatelessWidget {
               children: [
                 Text(
                   'Your Profile',
-                  style: TextStyle(color: kTextGrey.withOpacity(0.8), fontSize: 12),
+                  style: TextStyle(
+                    color: kTextGrey.withOpacity(0.8),
+                    fontSize: 12,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Age: $age  •  BMI: ${bmi.toStringAsFixed(1)}  •  $level',
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: kTextWhite),
+                  'Age: $age  •  BMI: ${bmi.toStringAsFixed(1)}  •  $level',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: kTextWhite,
+                  ),
                 ),
               ],
             ),
@@ -1157,10 +1207,6 @@ class _ProfileCard extends StatelessWidget {
   }
 }
 
-// --- FIX FOR SCROLLING: KeepAlive Wrapper ---
-// We convert this to a StatefulWidget and mix in AutomaticKeepAliveClientMixin.
-// This ensures that when the widget scrolls off-screen, it is NOT destroyed,
-// keeping the GIF loaded in memory.
 class _ExerciseCard extends StatefulWidget {
   final Exercise ex;
   const _ExerciseCard({required this.ex});
@@ -1169,25 +1215,14 @@ class _ExerciseCard extends StatefulWidget {
   State<_ExerciseCard> createState() => _ExerciseCardState();
 }
 
-class _ExerciseCardState extends State<_ExerciseCard> with AutomaticKeepAliveClientMixin {
+class _ExerciseCardState extends State<_ExerciseCard>
+    with AutomaticKeepAliveClientMixin {
   @override
-  bool get wantKeepAlive => true; // <--- KEY FIX: Always keep this alive
+  bool get wantKeepAlive => true;
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // Required by Mixin
-
-    final apiKey = dotenv.env['EXERCISE_API_KEY'] ?? '';
-    final apiHost = dotenv.env['EXERCISE_API_HOST'] ?? 'exercisedb.p.rapidapi.com';
-
-    final Map<String, String>? headers = apiKey.isNotEmpty
-        ? {
-            'X-RapidAPI-Key': apiKey,
-            'X-RapidAPI-Host': apiHost,
-          }
-        : null;
-
-    final thumbUrl = _exerciseGifUrl(widget.ex.id, resolution: 180);
+    super.build(context);
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -1206,15 +1241,12 @@ class _ExerciseCardState extends State<_ExerciseCard> with AutomaticKeepAliveCli
               height: 90,
               color: Colors.black12,
               child: widget.ex.id.trim().isEmpty
-                  ? const Center(child: Icon(Icons.image_not_supported, color: kTextGrey))
-                  : Image.network(
-                      thumbUrl,
-                      headers: headers,
-                      fit: BoxFit.cover,
-                      // We don't need fancy loading/error here because the widget won't rebuild often
-                      errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image, color: kTextGrey)),
-                    ),
-            ),
+                  ? const Center(
+                      child: Icon(Icons.image_not_supported, color: kTextGrey),
+                    )
+                  : _ExerciseGif(exerciseId: widget.ex.id,
+                  ),
+                ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1223,7 +1255,11 @@ class _ExerciseCardState extends State<_ExerciseCard> with AutomaticKeepAliveCli
               children: [
                 Text(
                   _prettyName(widget.ex.name),
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: kTextWhite),
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: kTextWhite,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Wrap(
@@ -1258,8 +1294,12 @@ class _Pill extends StatelessWidget {
         border: Border.all(color: kAccentCyan.withOpacity(0.3)),
       ),
       child: Text(
-        text, 
-        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kAccentCyan)
+        text,
+        style: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          color: kAccentCyan,
+        ),
       ),
     );
   }
@@ -1294,7 +1334,13 @@ class _WorkoutProgress extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 10),
-          Text('$done/$total', style: const TextStyle(fontWeight: FontWeight.bold, color: kTextWhite)),
+          Text(
+            '$done/$total',
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              color: kTextWhite,
+            ),
+          ),
         ],
       ),
     );
@@ -1329,11 +1375,16 @@ class _InfoBanner extends StatelessWidget {
         children: [
           Icon(icon, color: color),
           const SizedBox(width: 10),
-          Expanded(child: Text(text, style: TextStyle(fontWeight: FontWeight.bold, color: color))),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(fontWeight: FontWeight.bold, color: color),
+            ),
+          ),
           if (actionText != null && onAction != null)
             TextButton(
-              onPressed: onAction, 
-              child: Text(actionText!, style: TextStyle(color: color))
+              onPressed: onAction,
+              child: Text(actionText!, style: TextStyle(color: color)),
             ),
         ],
       ),
@@ -1355,7 +1406,12 @@ class _SkeletonBox extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: kGlassBorder),
       ),
-      child: Center(child: LinearProgressIndicator(minHeight: 3, color: kAccentCyan.withOpacity(0.5))),
+      child: Center(
+        child: LinearProgressIndicator(
+          minHeight: 3,
+          color: kAccentCyan.withOpacity(0.5),
+        ),
+      ),
     );
   }
 }
