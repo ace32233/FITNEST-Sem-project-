@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:ui';
+import 'intro_page.dart'; // <--- Added this import for navigation
 
 // --- GLOSSY DESIGN CONSTANTS ---
 const Color kDarkTeal = Color(0xFF132F38);
@@ -43,7 +44,7 @@ class _ProfilePageState extends State<ProfilePage> {
     super.initState();
     _loadUserProfile();
 
-    // Save data only when focus is lost to prevent keyboard dismissal while typing
+    // Save data only when focus is lost
     _ageFocus.addListener(() {
       if (!_ageFocus.hasFocus) _saveProfile();
     });
@@ -66,34 +67,25 @@ class _ProfilePageState extends State<ProfilePage> {
     super.dispose();
   }
 
-  // --- Supabase ↔ UI mapping helpers (no UI changes) ---
+  // --- Supabase ↔ UI mapping helpers ---
   String _genderUiFromDb(String? db) {
     switch ((db ?? '').toLowerCase()) {
-      case 'male':
-        return 'Male';
-      case 'female':
-        return 'Female';
-      case 'other':
-        return 'Other';
-      default:
-        return 'Male';
+      case 'male': return 'Male';
+      case 'female': return 'Female';
+      case 'other': return 'Other';
+      default: return 'Male';
     }
   }
 
   String _genderDbFromUi(String ui) {
     switch (ui.toLowerCase()) {
-      case 'male':
-        return 'male';
-      case 'female':
-        return 'female';
-      case 'other':
-        return 'other';
-      default:
-        return 'male';
+      case 'male': return 'male';
+      case 'female': return 'female';
+      case 'other': return 'other';
+      default: return 'male';
     }
   }
 
-  /// UI uses centimeters. DB stores height as feet + inches (user_fitness.height_ft/height_in).
   Map<String, int> _cmToFeetIn(double cm) {
     if (cm <= 0) return {'ft': 0, 'in': 0};
     final totalIn = cm / 2.54;
@@ -115,12 +107,10 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _loadUserProfile() async {
     final user = _supabase.auth.currentUser;
 
-    // Always show email quickly (UI behavior unchanged)
     setState(() {
       _email = user?.email ?? 'No Email';
     });
 
-    // Local fallback (kept to avoid UI/UX changes or empty fields while offline)
     final prefs = await SharedPreferences.getInstance();
     _ageController.text = prefs.getString('profile_age') ?? '25';
     _heightController.text = prefs.getString('profile_height') ?? '175';
@@ -131,7 +121,6 @@ class _ProfilePageState extends State<ProfilePage> {
     if (user == null) return;
 
     try {
-      // Pull latest from Supabase (user_fitness)
       final fitness = await _supabase
           .from('user_fitness')
           .select('gender, age, weight_kg, height_ft, height_in')
@@ -160,17 +149,14 @@ class _ProfilePageState extends State<ProfilePage> {
           _calculateBMI();
         });
 
-        // Keep local cache in sync (non-UI)
         await prefs.setString('profile_age', _ageController.text);
         await prefs.setString('profile_height', _heightController.text);
         await prefs.setString('profile_weight', _weightController.text);
         await prefs.setString('profile_gender', _gender);
       } else {
-        // If row doesn't exist yet, create it using current UI values (silent, no UI change)
         await _saveProfile();
       }
     } catch (e) {
-      // If Supabase fetch fails, we keep the local values (no UI disruption)
       debugPrint('Profile load error: $e');
     }
   }
@@ -178,7 +164,6 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _saveProfile() async {
     final prefs = await SharedPreferences.getInstance();
 
-    // Always keep local cache (behavior similar to before)
     await prefs.setString('profile_age', _ageController.text);
     await prefs.setString('profile_height', _heightController.text);
     await prefs.setString('profile_weight', _weightController.text);
@@ -204,7 +189,6 @@ class _ProfilePageState extends State<ProfilePage> {
         'updated_at': DateTime.now().toIso8601String(),
       });
 
-      // Optional: ensure profiles row exists (safe upsert, does not affect UI)
       await _supabase.from('profiles').upsert({
         'id': user.id,
         'email': user.email ?? _email,
@@ -227,7 +211,7 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  // --- Password Change Logic (With Backend Integration) ---
+  // --- Password Change Logic ---
   void _showChangePasswordDialog() {
     final oldPasswordController = TextEditingController();
     final newPasswordController = TextEditingController();
@@ -248,7 +232,6 @@ class _ProfilePageState extends State<ProfilePage> {
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Old Password
                 TextField(
                   controller: oldPasswordController,
                   obscureText: true,
@@ -267,7 +250,6 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 ),
                 const SizedBox(height: 15),
-                // New Password
                 TextField(
                   controller: newPasswordController,
                   obscureText: true,
@@ -318,13 +300,11 @@ class _ProfilePageState extends State<ProfilePage> {
                           final userEmail = _supabase.auth.currentUser?.email;
                           if (userEmail == null) throw "User not found";
 
-                          // 1. Verify Old Password (by re-authenticating)
                           await _supabase.auth.signInWithPassword(
                             email: userEmail,
                             password: oldPasswordController.text,
                           );
 
-                          // 2. Update to New Password
                           await _supabase.auth.updateUser(
                             UserAttributes(password: newPasswordController.text),
                           );
@@ -367,11 +347,8 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // -------------------------------
-  // PRODUCTION LOGOUT (CONFIRMATION)
-  // -------------------------------
+  // --- LOGOUT LOGIC ---
   Future<void> _confirmAndLogout() async {
-    // Keep UX stable: close keyboard before dialog
     FocusScope.of(context).unfocus();
 
     final bool? confirm = await showDialog<bool>(
@@ -413,18 +390,20 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Future<void> _logout() async {
     try {
-      // 1) Supabase sign out (invalidate session)
+      // 1. Sign out from Supabase
       await _supabase.auth.signOut();
-
-      // 2) Clear local cache
+      
+      // 2. Clear local storage
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
 
       if (!mounted) return;
-
-      // 3) Navigate to login page (remove entire back stack)
-      // IMPORTANT: Ensure your MaterialApp has route '/login' mapped to login_page.dart
-      Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+      
+      // 3. Navigate directly to IntroPage (which handles redirect to Login)
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const IntroPage()),
+        (route) => false,
+      );
     } on AuthException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -444,14 +423,14 @@ class _ProfilePageState extends State<ProfilePage> {
       backgroundColor: Colors.transparent,
       body: GestureDetector(
         onTap: () {
-          FocusScope.of(context).unfocus(); // Saves data due to focus listeners
+          FocusScope.of(context).unfocus();
         },
         child: SingleChildScrollView(
           physics: const BouncingScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(20, 60, 20, 120),
           child: Column(
             children: [
-              // --- HEADER SECTION (DEFAULT ICON ONLY) ---
+              // --- HEADER ---
               Container(
                 width: 100,
                 height: 100,
@@ -484,7 +463,6 @@ class _ProfilePageState extends State<ProfilePage> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  // Age Input
                   Expanded(
                     child: _buildGlossyInput(
                       "Age",
@@ -495,7 +473,6 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                   ),
                   const SizedBox(width: 15),
-                  // Gender Dropdown
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -504,7 +481,7 @@ class _ProfilePageState extends State<ProfilePage> {
                             style: TextStyle(color: kTextGrey.withOpacity(0.8), fontSize: 12)),
                         const SizedBox(height: 6),
                         Container(
-                          height: 56, // Matches TextField height
+                          height: 56,
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           decoration: BoxDecoration(
                             color: kCardSurface.withOpacity(0.6),
@@ -615,10 +592,14 @@ class _ProfilePageState extends State<ProfilePage> {
                         borderRadius: BorderRadius.circular(6),
                         child: Row(
                           children: [
-                            Expanded(flex: 18, child: Container(color: Colors.blueAccent)), // Underweight
-                            Expanded(flex: 7, child: Container(color: Colors.greenAccent)), // Normal
-                            Expanded(flex: 5, child: Container(color: Colors.orangeAccent)), // Overweight
-                            Expanded(flex: 10, child: Container(color: Colors.redAccent)), // Obese
+                            // 0-18.5
+                            Expanded(flex: 185, child: Container(color: Colors.blueAccent)), 
+                            // 18.5-25 (Normal)
+                            Expanded(flex: 65, child: Container(color: Colors.greenAccent)), 
+                            // 25-30 (Overweight)
+                            Expanded(flex: 50, child: Container(color: Colors.orangeAccent)), 
+                            // 30-40 (Obese)
+                            Expanded(flex: 100, child: Container(color: Colors.redAccent)), 
                           ],
                         ),
                       ),
@@ -627,8 +608,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     // Pointer Logic
                     LayoutBuilder(
                       builder: (context, constraints) {
-                        double position =
-                            (_bmi / 40).clamp(0.0, 1.0) * constraints.maxWidth;
+                        double position = (_bmi / 40).clamp(0.0, 1.0) * constraints.maxWidth;
                         position = (position - 6).clamp(0.0, constraints.maxWidth - 12);
 
                         return Stack(
@@ -668,7 +648,6 @@ class _ProfilePageState extends State<ProfilePage> {
                 _showChangePasswordDialog,
               ),
               const SizedBox(height: 15),
-              // ONLY CHANGE: logout now confirms and then logs out
               _buildActionButton(
                 "Log Out",
                 Icons.logout_rounded,
@@ -697,7 +676,7 @@ class _ProfilePageState extends State<ProfilePage> {
         Text(label, style: TextStyle(color: kTextGrey.withOpacity(0.8), fontSize: 12)),
         const SizedBox(height: 6),
         Container(
-          height: 56, // Fixed height ensures alignment
+          height: 56,
           decoration: BoxDecoration(
             color: kCardSurface.withOpacity(0.6),
             borderRadius: BorderRadius.circular(20),
@@ -757,7 +736,7 @@ class _ProfilePageState extends State<ProfilePage> {
     if (bmi < 25) return Colors.greenAccent;
     if (bmi < 30) return Colors.orangeAccent;
     return Colors.redAccent;
-    }
+  }
 
   String _getBMICategory(double bmi) {
     if (bmi < 18.5) return "Underweight";

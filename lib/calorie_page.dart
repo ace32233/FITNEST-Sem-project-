@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:ui'; 
+import 'dart:math' as math; 
 import 'services/supabase_nutrition_service.dart';
 import 'services/user_goals_service.dart';
 import 'services/groq_service.dart';
@@ -17,7 +18,10 @@ const Color kTextWhite = Colors.white;
 const Color kTextGrey = Color(0xFF94A3B8);
 
 class NutritionPage extends StatefulWidget {
-  const NutritionPage({super.key});
+  // 1. ADDED CALLBACK PARAMETER
+  final Function(double calories, double protein, double carbs, double fat)? onDataChanged;
+
+  const NutritionPage({super.key, this.onDataChanged});
 
   @override
   State<NutritionPage> createState() => _NutritionPageState();
@@ -100,6 +104,14 @@ class _NutritionPageState extends State<NutritionPage> {
           foodLog = meals;
           isLoading = false; 
         });
+
+        // 2. TRIGGER CALLBACK TO PARENT
+        widget.onDataChanged?.call(
+          caloriesValue, 
+          proteinValue, 
+          carbsValue, 
+          fatValue
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -155,7 +167,7 @@ class _NutritionPageState extends State<NutritionPage> {
       }
 
       _searchController.clear();
-      await _loadTodayData(silent: true);
+      await _loadTodayData(silent: true); // Triggers callback inside
 
       setState(() => isCalculating = false);
     } catch (e) {
@@ -329,6 +341,7 @@ class _NutritionPageState extends State<NutritionPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // --- UPDATED GLOSSY SUMMARY CARD (New Design) ---
                         GlossySummaryCard(
                           consumed: caloriesValue.toInt(),
                           goal: caloriesLimit.toInt(),
@@ -449,20 +462,21 @@ class GlossySummaryCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(32),
         color: kCardSurface.withOpacity(0.6),
+        borderRadius: BorderRadius.circular(32),
         border: Border.all(color: kGlassBorder),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.3),
+            color: Colors.black.withOpacity(0.25),
             blurRadius: 25,
             offset: const Offset(0, 10),
           ),
         ],
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // --- HEADER & EDIT ---
+          // --- HEADER: Label & Edit ---
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -498,7 +512,7 @@ class GlossySummaryCard extends StatelessWidget {
           ),
           const SizedBox(height: 24),
 
-          // --- MAIN STATS (Linear Style) ---
+          // --- MAIN STATS (Linear Layout) ---
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -527,9 +541,10 @@ class GlossySummaryCard extends StatelessWidget {
           ),
           const SizedBox(height: 16),
 
-          // --- LINEAR PROGRESS BAR ---
+          // --- PROGRESS BAR ---
           Stack(
             children: [
+              // Background Track
               Container(
                 height: 24,
                 width: double.infinity,
@@ -538,6 +553,7 @@ class GlossySummaryCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
+              // Foreground Fill
               LayoutBuilder(
                 builder: (context, constraints) {
                   return Container(
@@ -561,6 +577,7 @@ class GlossySummaryCard extends StatelessWidget {
                   );
                 },
               ),
+              // Text inside bar (Percent & Total)
               Positioned.fill(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -593,10 +610,10 @@ class GlossySummaryCard extends StatelessWidget {
           ),
 
           const SizedBox(height: 24),
-          const Divider(color: kGlassBorder),
+          const Divider(color: kGlassBorder, height: 1),
           const SizedBox(height: 16),
-          
-          // --- MACROS (Horizontal Rows) ---
+
+          // --- MACROS (Responsive Horizontal Rows) ---
           _buildMacroRow("Protein", protein, proteinGoal, kAccentCyan),
           const SizedBox(height: 12),
           _buildMacroRow("Carbs", carbs, carbsGoal, Colors.purpleAccent),
@@ -611,7 +628,7 @@ class GlossySummaryCard extends StatelessWidget {
     final progress = goal > 0 ? (value / goal).clamp(0.0, 1.0) : 0.0;
     return Row(
       children: [
-        // Responsive Text
+        // Responsive Label
         Expanded(
           flex: 2,
           child: Text(label, style: const TextStyle(color: kTextGrey, fontSize: 13)),
