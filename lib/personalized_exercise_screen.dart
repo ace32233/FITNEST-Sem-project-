@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:ui'; // Added for ImageFilter
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,16 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+// --- GLOSSY DESIGN CONSTANTS ---
+const Color kDarkTeal = Color(0xFF132F38);
+const Color kDarkSlate = Color(0xFF0F172A);
+const Color kGlassBorder = Color(0x1AFFFFFF);
+const Color kCardSurface = Color(0xFF1E293B);
+const Color kAccentCyan = Color(0xFF22D3EE);
+const Color kAccentBlue = Color(0xFF3B82F6);
+const Color kTextWhite = Colors.white;
+const Color kTextGrey = Color(0xFF94A3B8);
 
 /// ------------------------------
 /// Models
@@ -38,9 +49,6 @@ class Exercise {
   final String bodyPart;
   final String target;
   final String equipment;
-
-  // Kept only so your Supabase "workout_logs" JSON can store it.
-  // In ExerciseDB v2.2, gifUrl usually is NOT included in exercise list responses.
   final String gifUrl;
 
   const Exercise({
@@ -61,7 +69,6 @@ class Exercise {
       return fallback;
     }
 
-    // Optional gifUrl - safe default
     String rawGif = pickStr(['gifUrl', 'gif_url'], fallback: '').trim();
     if (rawGif.startsWith('http://')) {
       rawGif = rawGif.replaceFirst('http://', 'https://');
@@ -118,12 +125,9 @@ String levelFromBmiAndAge({required double bmi, required int age}) {
   return 'beginner';
 }
 
-/// ✅ Correct ExerciseDB v2.2 image URL (GET /image?resolution=...&exerciseId=...)
 String _exerciseGifUrl(String exerciseId, {int resolution = 180}) {
   final id = exerciseId.trim();
   if (id.isEmpty) return '';
-
-  
   if (resolution != 180) resolution = 180;
 
   return Uri.https(
@@ -135,7 +139,6 @@ String _exerciseGifUrl(String exerciseId, {int resolution = 180}) {
     },
   ).toString();
 }
-
 
 /// ------------------------------
 /// Supabase Profile
@@ -151,7 +154,7 @@ final userProfileProvider = FutureProvider.autoDispose<UserProfile>((ref) async 
       .maybeSingle();
 
   if (fitness == null) {
-    throw Exception('No fitness profile found in user_fitness table for this user.');
+    throw Exception('No fitness profile found.');
   }
 
   final age = _asInt(fitness['age']);
@@ -185,18 +188,12 @@ enum MuscleGroup { back, chest, legs, arms, cardio, core }
 extension MuscleGroupX on MuscleGroup {
   String get label {
     switch (this) {
-      case MuscleGroup.back:
-        return 'Back';
-      case MuscleGroup.chest:
-        return 'Chest';
-      case MuscleGroup.legs:
-        return 'Legs';
-      case MuscleGroup.arms:
-        return 'Arms';
-      case MuscleGroup.cardio:
-        return 'Cardio';
-      case MuscleGroup.core:
-        return 'Core';
+      case MuscleGroup.back: return 'Back';
+      case MuscleGroup.chest: return 'Chest';
+      case MuscleGroup.legs: return 'Legs';
+      case MuscleGroup.arms: return 'Arms';
+      case MuscleGroup.cardio: return 'Cardio';
+      case MuscleGroup.core: return 'Core';
     }
   }
 }
@@ -220,7 +217,7 @@ Future<http.Response> _exerciseDbGet(Uri uri) async {
   final host = dotenv.env['EXERCISE_API_HOST'] ?? 'exercisedb.p.rapidapi.com';
 
   if (apiKey.trim().isEmpty) {
-    throw Exception('Exercise API credentials not found in .env (EXERCISE_API_KEY).');
+    throw Exception('Exercise API credentials not found.');
   }
 
   final res = await http.get(
@@ -243,7 +240,7 @@ Future<List<Exercise>> _fetchExercisesForBodyPart(String bodyPart) async {
 
   final res = await _exerciseDbGet(uri);
   if (res.statusCode != 200) {
-    throw Exception('Failed to fetch exercises for "$bodyPart": ${res.statusCode}');
+    throw Exception('Failed to fetch exercises: ${res.statusCode}');
   }
 
   final decoded = json.decode(res.body);
@@ -283,7 +280,7 @@ final exercisesForGroupProvider = FutureProvider.autoDispose<List<Exercise>>((re
 /// Local history (SharedPreferences)
 /// ------------------------------
 class WorkoutHistory {
-  final String date; // yyyy-mm-dd
+  final String date; 
   final bool completed;
   final int durationMinutes;
   final String muscleGroup;
@@ -377,7 +374,6 @@ class WorkoutState {
 
   bool get hasWorkout => workout.isNotEmpty;
   bool get isFinished => hasWorkout && completedIds.length >= workout.length;
-
   int get total => workout.length;
   int get done => completedIds.length;
 
@@ -415,7 +411,6 @@ class WorkoutState {
 class WorkoutController extends StateNotifier<WorkoutState> {
   WorkoutController(this._ref) : super(WorkoutState.empty());
   final Ref _ref;
-
   bool _isSaving = false;
 
   void reset() {
@@ -428,7 +423,6 @@ class WorkoutController extends StateNotifier<WorkoutState> {
       state = WorkoutState.empty();
       return;
     }
-
     final maxLen = min(6, source.length);
     final len = max(3, maxLen);
     final picked = _pickUniqueRandom(source, len);
@@ -445,18 +439,14 @@ class WorkoutController extends StateNotifier<WorkoutState> {
 
   void completeCurrentAndNext() {
     if (state.isFinished || _isSaving) return;
-
     final cur = state.current;
     if (cur == null) return;
 
     final newCompleted = {...state.completedIds, cur.id};
     final nextIndex = min(state.workout.length - 1, state.index + 1);
-
     state = state.copyWith(completedIds: newCompleted, index: nextIndex);
 
-    if (state.isFinished) {
-      _persistCompletion();
-    }
+    if (state.isFinished) _persistCompletion();
   }
 
   void goPrev() {
@@ -488,7 +478,6 @@ class WorkoutController extends StateNotifier<WorkoutState> {
     final today = _todayDateKey();
     final groupLabel = (state.muscleGroup?.label ?? 'Unknown');
 
-    // 1) Local
     final history = WorkoutHistory(
       date: today,
       completed: true,
@@ -498,11 +487,9 @@ class WorkoutController extends StateNotifier<WorkoutState> {
     );
     await _ref.read(historyRepoProvider).save(history);
 
-    // 2) Supabase
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
 
-    // A) Upsert daily_activities
     final existingDay = await Supabase.instance.client
         .from('daily_activities')
         .select('id, goals_met, workout_duration_minutes')
@@ -531,11 +518,8 @@ class WorkoutController extends StateNotifier<WorkoutState> {
       }).eq('id', existingDay['id']);
     }
 
-    // B) Upsert workout_logs
-    // Store gifUrl as the "Image Service" URL so it can be replayed later.
     final exercisesJson = state.workout
-        .map((e) => e.toJson()
-          ..['gifUrl'] = _exerciseGifUrl(e.id))
+        .map((e) => e.toJson()..['gifUrl'] = _exerciseGifUrl(e.id))
         .toList();
 
     final existingLog = await Supabase.instance.client
@@ -576,7 +560,7 @@ final workoutControllerProvider =
 );
 
 /// ------------------------------
-/// UI
+/// UI: Personalized Exercise Screen
 /// ------------------------------
 class PersonalizedExerciseScreen extends ConsumerWidget {
   const PersonalizedExerciseScreen({super.key});
@@ -591,190 +575,227 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
 
     final bool alreadyDoneToday = todayHistoryAsync.valueOrNull?.completed ?? false;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF7F4FF),
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: const Color(0xFFF7F4FF),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'Personalized Exercises',
-          style: TextStyle(color: Colors.black, fontWeight: FontWeight.w900),
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [kDarkSlate, kDarkTeal],
         ),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            profileAsync.when(
-              data: (p) => _ProfileCard(
-                age: p.age,
-                bmi: p.bmi,
-                level: ref.watch(personalizedLevelProvider),
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          // --- CHANGE: REMOVED BACK BUTTON ---
+          automaticallyImplyLeading: false, // Ensures no back button shows
+          title: const Text(
+            'Personalized Exercises',
+            style: TextStyle(color: kTextWhite, fontWeight: FontWeight.bold),
+          ),
+          centerTitle: true, // Center the title since there's no leading icon
+        ),
+        body: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 1. Profile Card
+              profileAsync.when(
+                data: (p) => _ProfileCard(
+                  age: p.age,
+                  bmi: p.bmi,
+                  level: ref.watch(personalizedLevelProvider),
+                ),
+                loading: () => const _SkeletonBox(height: 56),
+                error: (e, _) => Text('Profile error: $e', style: const TextStyle(color: Colors.red)),
               ),
-              loading: () => const _SkeletonBox(height: 56),
-              error: (e, _) => Text('Profile error: $e'),
-            ),
-            const SizedBox(height: 12),
-            todayHistoryAsync.when(
-              data: (h) {
-                if (h == null || h.completed != true) return const SizedBox.shrink();
-                return _InfoBanner(
-                  icon: Icons.check_circle,
-                  text: 'Today completed • ${h.durationMinutes} min • ${h.muscleGroup}',
-                );
-              },
-              loading: () => const SizedBox.shrink(),
-              error: (_, __) => const SizedBox.shrink(),
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'Choose muscle group',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 44,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: MuscleGroup.values.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 10),
-                itemBuilder: (context, i) {
-                  final g = MuscleGroup.values[i];
-                  final isSelected = g == selectedGroup;
-                  return ChoiceChip(
-                    label: Text(g.label),
-                    selected: isSelected,
-                    onSelected: (_) {
-                      ref.read(workoutControllerProvider.notifier).reset();
-                      ref.read(selectedGroupProvider.notifier).state = g;
-                    },
-                    selectedColor: const Color(0xFFDED2FF),
-                    backgroundColor: Colors.white,
-                    shape: StadiumBorder(
-                      side: BorderSide(color: isSelected ? Colors.black26 : Colors.black12),
-                    ),
-                    labelStyle: const TextStyle(fontWeight: FontWeight.w800, color: Colors.black),
+              const SizedBox(height: 12),
+
+              // 2. Today Status
+              todayHistoryAsync.when(
+                data: (h) {
+                  if (h == null || h.completed != true) return const SizedBox.shrink();
+                  return _InfoBanner(
+                    icon: Icons.check_circle,
+                    text: 'Today completed • ${h.durationMinutes} min • ${h.muscleGroup}',
+                    color: kAccentCyan,
                   );
                 },
+                loading: () => const SizedBox.shrink(),
+                error: (_, __) => const SizedBox.shrink(),
               ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              selectedGroup == null ? 'Exercises' : 'Exercises for: ${selectedGroup.label}',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(height: 10),
-            if (workout.hasWorkout)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _WorkoutProgress(done: workout.done, total: workout.total),
+              const SizedBox(height: 10),
+
+              // 3. Muscle Group Selector
+              const Text(
+                'Choose muscle group',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: kTextWhite),
               ),
-            Expanded(
-              child: exercisesAsync.when(
-                data: (items) {
-                  if (selectedGroup == null) {
-                    return const Center(
-                      child: Text(
-                        'Select a muscle group to load exercises.',
-                        style: TextStyle(fontWeight: FontWeight.w700),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 44,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: MuscleGroup.values.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 10),
+                  itemBuilder: (context, i) {
+                    final g = MuscleGroup.values[i];
+                    final isSelected = g == selectedGroup;
+                    return InkWell(
+                      onTap: () {
+                        ref.read(workoutControllerProvider.notifier).reset();
+                        ref.read(selectedGroupProvider.notifier).state = g;
+                      },
+                      borderRadius: BorderRadius.circular(22),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: isSelected ? kAccentCyan.withOpacity(0.8) : kCardSurface.withOpacity(0.6),
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(
+                            color: isSelected ? kAccentCyan : kGlassBorder,
+                            width: 1,
+                          ),
+                        ),
+                        child: Text(
+                          g.label,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: isSelected ? kDarkSlate : kTextWhite,
+                          ),
+                        ),
                       ),
                     );
-                  }
-                  if (items.isEmpty) return const Center(child: Text('No exercises found.'));
-                  return ListView.separated(
-                    itemCount: items.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 12),
-                    itemBuilder: (context, i) => _ExerciseCard(ex: items[i]),
-                  );
-                },
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (e, _) => Center(child: Text('Exercises error: $e')),
+                  },
+                ),
               ),
-            ),
-          ],
-        ),
-      ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-          child: exercisesAsync.when(
-            data: (items) {
-              final canStart = selectedGroup != null && items.length >= 3;
+              const SizedBox(height: 14),
 
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (workout.hasWorkout && !workout.isFinished)
-                    _InfoBanner(
-                      icon: Icons.fitness_center,
-                      text: 'Workout in progress • ${workout.done}/${workout.total} done',
-                      actionText: 'Open',
-                      onAction: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (_) => const WorkoutPlayerScreen()),
-                        );
-                      },
-                    ),
-                  if (workout.isFinished)
-                    const _InfoBanner(
-                      icon: Icons.celebration,
-                      text: 'Workout completed for today 🎉 (Saved to Supabase)',
-                    ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 54,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: (workout.isFinished || alreadyDoneToday)
-                            ? Colors.grey
-                            : const Color(0xFF6D4CFF),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              // 4. Exercise List Header
+              Text(
+                selectedGroup == null ? 'Exercises' : 'Exercises for: ${selectedGroup.label}',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kTextWhite),
+              ),
+              const SizedBox(height: 10),
+
+              if (workout.hasWorkout)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _WorkoutProgress(done: workout.done, total: workout.total),
+                ),
+
+              // 5. Exercise List
+              Expanded(
+                child: exercisesAsync.when(
+                  data: (items) {
+                    if (selectedGroup == null) {
+                      return const Center(
+                        child: Text(
+                          'Select a muscle group to load exercises.',
+                          style: TextStyle(color: kTextGrey),
+                        ),
+                      );
+                    }
+                    if (items.isEmpty) return const Center(child: Text('No exercises found.', style: TextStyle(color: kTextGrey)));
+
+                    return ListView.separated(
+                      itemCount: items.length,
+                      // Preload a bit more content
+                      cacheExtent: 1000, 
+                      separatorBuilder: (_, __) => const SizedBox(height: 12),
+                      itemBuilder: (context, i) => _ExerciseCard(ex: items[i]),
+                    );
+                  },
+                  loading: () => const Center(child: CircularProgressIndicator(color: kAccentCyan)),
+                  error: (e, _) => Center(child: Text('Exercises error: $e', style: const TextStyle(color: Colors.red))),
+                ),
+              ),
+            ],
+          ),
+        ),
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+            child: exercisesAsync.when(
+              data: (items) {
+                final canStart = selectedGroup != null && items.length >= 3;
+
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (workout.hasWorkout && !workout.isFinished)
+                      _InfoBanner(
+                        icon: Icons.fitness_center,
+                        text: 'Workout in progress • ${workout.done}/${workout.total} done',
+                        actionText: 'Open',
+                        color: kAccentBlue,
+                        onAction: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const WorkoutPlayerScreen()),
+                          );
+                        },
                       ),
-                      onPressed: (workout.isFinished || alreadyDoneToday)
-                          ? null
-                          : () {
-                              if (!workout.hasWorkout) {
-                                if (!canStart) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Pick a group with at least 3 exercises.'),
-                                    ),
-                                  );
-                                  return;
-                                }
-                                ref.read(workoutControllerProvider.notifier).startFromSource(
-                                      items,
-                                      group: selectedGroup!,
+                    if (workout.isFinished)
+                      const _InfoBanner(
+                        icon: Icons.celebration,
+                        text: 'Workout completed for today 🎉',
+                        color: Colors.greenAccent,
+                      ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 54,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: (workout.isFinished || alreadyDoneToday)
+                              ? Colors.grey.withOpacity(0.3)
+                              : kAccentCyan,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          foregroundColor: kDarkSlate,
+                        ),
+                        onPressed: (workout.isFinished || alreadyDoneToday)
+                            ? null
+                            : () {
+                                if (!workout.hasWorkout) {
+                                  if (!canStart) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Pick a group with at least 3 exercises.'),
+                                        backgroundColor: Colors.redAccent,
+                                      ),
                                     );
-                              }
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(builder: (_) => const WorkoutPlayerScreen()),
-                              );
-                            },
-                      child: Text(
-                        alreadyDoneToday
-                            ? 'Come back tomorrow!'
-                            : (workout.hasWorkout ? 'Continue Workout' : 'Start Workout (3-6)'),
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                                    return;
+                                  }
+                                  ref.read(workoutControllerProvider.notifier).startFromSource(
+                                        items,
+                                        group: selectedGroup!,
+                                      );
+                                }
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (_) => const WorkoutPlayerScreen()),
+                                );
+                              },
+                        child: Text(
+                          alreadyDoneToday
+                              ? 'Come back tomorrow!'
+                              : (workout.hasWorkout ? 'Continue Workout' : 'Start Workout (3-6)'),
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              );
-            },
-            loading: () => const SizedBox(
-              height: 54,
-              child: Center(child: CircularProgressIndicator()),
+                  ],
+                );
+              },
+              loading: () => const SizedBox(
+                height: 54,
+                child: Center(child: CircularProgressIndicator(color: kAccentCyan)),
+              ),
+              error: (_, __) => const SizedBox.shrink(),
             ),
-            error: (_, __) => const SizedBox.shrink(),
           ),
         ),
       ),
@@ -783,7 +804,7 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
 }
 
 /// ------------------------------
-/// Workout Player (sequence + GIF)
+/// Workout Player
 /// ------------------------------
 class WorkoutPlayerScreen extends ConsumerWidget {
   const WorkoutPlayerScreen({super.key});
@@ -794,48 +815,57 @@ class WorkoutPlayerScreen extends ConsumerWidget {
     final controller = ref.read(workoutControllerProvider.notifier);
     final cur = workout.current;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF7F4FF),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFFF7F4FF),
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () => Navigator.pop(context),
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [kDarkSlate, kDarkTeal],
         ),
-        title: Text(
-          workout.isFinished ? 'Completed' : 'Workout (${workout.done}/${workout.total})',
-          style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w900),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              controller.reset();
-              Navigator.pop(context);
-            },
-            child: const Text('Reset'),
-          ),
-        ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: workout.hasWorkout
-            ? (workout.isFinished
-                ? _CompletedView(onDone: () => Navigator.pop(context))
-                : _WorkoutStepView(
-                    exercise: cur!,
-                    isDone: workout.completedIds.contains(cur.id),
-                    onPrev: controller.goPrev,
-                    onNext: controller.goNext,
-                    onComplete: controller.completeCurrentAndNext,
-                  ))
-            : const Center(
-                child: Text(
-                  'No workout started.\nGo back and press Start Workout.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontWeight: FontWeight.w800),
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: kTextWhite),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: Text(
+            workout.isFinished ? 'Completed' : 'Workout (${workout.done}/${workout.total})',
+            style: const TextStyle(color: kTextWhite, fontWeight: FontWeight.bold),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                controller.reset();
+                Navigator.pop(context);
+              },
+              child: const Text('Reset', style: TextStyle(color: kAccentCyan)),
+            ),
+          ],
+        ),
+        body: Padding(
+          padding: const EdgeInsets.all(16),
+          child: workout.hasWorkout
+              ? (workout.isFinished
+                  ? _CompletedView(onDone: () => Navigator.pop(context))
+                  : _WorkoutStepView(
+                      exercise: cur!,
+                      isDone: workout.completedIds.contains(cur.id),
+                      onPrev: controller.goPrev,
+                      onNext: controller.goNext,
+                      onComplete: controller.completeCurrentAndNext,
+                    ))
+              : const Center(
+                  child: Text(
+                    'No workout started.\nGo back and press Start Workout.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontWeight: FontWeight.bold, color: kTextWhite),
+                  ),
                 ),
-              ),
+        ),
       ),
     );
   }
@@ -874,19 +904,16 @@ class _WorkoutStepView extends StatelessWidget {
           width: double.infinity,
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: kCardSurface.withOpacity(0.6),
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.black12),
-            boxShadow: const [
-              BoxShadow(blurRadius: 16, offset: Offset(0, 6), color: Color(0x14000000)),
-            ],
+            border: Border.all(color: kGlassBorder),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 _prettyName(exercise.name),
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kTextWhite),
               ),
               const SizedBox(height: 10),
               ClipRRect(
@@ -913,13 +940,21 @@ class _WorkoutStepView extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF1ECFF),
+                  color: kAccentBlue.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.black12),
+                  border: Border.all(color: kAccentBlue.withOpacity(0.2)),
                 ),
-                child: const Text(
-                  'Tip: Controlled reps, full range of motion, steady breathing.',
-                  style: TextStyle(fontWeight: FontWeight.w700),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, color: kAccentBlue, size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Tip: Controlled reps, full range of motion.',
+                        style: TextStyle(fontWeight: FontWeight.bold, color: kTextGrey),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -933,7 +968,9 @@ class _WorkoutStepView extends StatelessWidget {
                 onPressed: onPrev,
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
+                  side: const BorderSide(color: kGlassBorder),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  foregroundColor: kTextWhite,
                 ),
                 child: const Text('Prev'),
               ),
@@ -944,7 +981,9 @@ class _WorkoutStepView extends StatelessWidget {
                 onPressed: onNext,
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
+                  side: const BorderSide(color: kGlassBorder),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  foregroundColor: kTextWhite,
                 ),
                 child: const Text('Next'),
               ),
@@ -957,13 +996,14 @@ class _WorkoutStepView extends StatelessWidget {
           height: 54,
           child: ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: isDone ? Colors.green : const Color(0xFF6D4CFF),
+              backgroundColor: isDone ? Colors.green : kAccentCyan,
+              foregroundColor: kDarkSlate,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             ),
             onPressed: onComplete,
             child: Text(
               isDone ? 'Done ✓ (Next)' : 'Mark Done',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
           ),
         ),
@@ -971,6 +1011,10 @@ class _WorkoutStepView extends StatelessWidget {
     );
   }
 }
+
+/// ------------------------------
+/// Components with Glossy Design & Fixes
+/// ------------------------------
 
 class _ExerciseGif extends StatelessWidget {
   final String url;
@@ -984,7 +1028,7 @@ class _ExerciseGif extends StatelessWidget {
       return Container(
         color: Colors.black12,
         alignment: Alignment.center,
-        child: const Text('No Preview', style: TextStyle(color: Colors.black45)),
+        child: const Text('No Preview', style: TextStyle(color: kTextGrey)),
       );
     }
 
@@ -998,25 +1042,19 @@ class _ExerciseGif extends StatelessWidget {
         return Container(
           color: Colors.black12,
           alignment: Alignment.center,
-          child: const CircularProgressIndicator(),
+          child: const CircularProgressIndicator(color: kAccentCyan),
         );
       },
       errorBuilder: (_, error, __) {
-        debugPrint('[IMAGE ERROR] Failed to load: $url\nError: $error');
         return Container(
           color: Colors.black12,
           alignment: Alignment.center,
-          padding: const EdgeInsets.all(12),
           child: const Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.broken_image, color: Colors.black38, size: 32),
+              Icon(Icons.broken_image, color: kTextGrey, size: 32),
               SizedBox(height: 4),
-              Text(
-                'No Preview',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black45),
-              ),
+              Text('No Preview', style: TextStyle(color: kTextGrey)),
             ],
           ),
         );
@@ -1033,28 +1071,35 @@ class _CompletedView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: kCardSurface.withOpacity(0.8),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.black12),
+          border: Border.all(color: kGlassBorder),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.celebration, size: 42),
+            const Icon(Icons.celebration, size: 50, color: kAccentCyan),
             const SizedBox(height: 10),
             const Text(
               'Workout Completed!',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: kTextWhite),
             ),
             const SizedBox(height: 6),
             const Text(
-              'Saved locally + Supabase (daily_activities + workout_logs)',
-              style: TextStyle(fontWeight: FontWeight.w700),
+              'Saved locally + Supabase',
+              style: TextStyle(color: kTextGrey),
             ),
-            const SizedBox(height: 12),
-            ElevatedButton(onPressed: onDone, child: const Text('Back')),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kAccentCyan,
+                foregroundColor: kDarkSlate,
+              ),
+              onPressed: onDone,
+              child: const Text('Back'),
+            ),
           ],
         ),
       ),
@@ -1062,9 +1107,6 @@ class _CompletedView extends StatelessWidget {
   }
 }
 
-/// ------------------------------
-/// UI bits (unchanged UI)
-/// ------------------------------
 class _ProfileCard extends StatelessWidget {
   final int age;
   final double bmi;
@@ -1076,23 +1118,37 @@ class _ProfileCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: kCardSurface.withOpacity(0.6),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black12),
-        boxShadow: const [
-          BoxShadow(blurRadius: 16, offset: Offset(0, 6), color: Color(0x14000000)),
-        ],
+        border: Border.all(color: kGlassBorder),
       ),
       child: Row(
         children: [
-          const Icon(Icons.person, size: 22),
-          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: kAccentBlue.withOpacity(0.2),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.person, size: 22, color: kAccentBlue),
+          ),
+          const SizedBox(width: 12),
           Expanded(
-            child: Text(
-              'Age: $age  •  BMI: ${bmi.toStringAsFixed(1)}  •  Level: $level',
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Your Profile',
+                  style: TextStyle(color: kTextGrey.withOpacity(0.8), fontSize: 12),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Age: $age  •  BMI: ${bmi.toStringAsFixed(1)}  •  $level',
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: kTextWhite),
+                ),
+              ],
             ),
           ),
         ],
@@ -1101,12 +1157,26 @@ class _ProfileCard extends StatelessWidget {
   }
 }
 
-class _ExerciseCard extends StatelessWidget {
+// --- FIX FOR SCROLLING: KeepAlive Wrapper ---
+// We convert this to a StatefulWidget and mix in AutomaticKeepAliveClientMixin.
+// This ensures that when the widget scrolls off-screen, it is NOT destroyed,
+// keeping the GIF loaded in memory.
+class _ExerciseCard extends StatefulWidget {
   final Exercise ex;
   const _ExerciseCard({required this.ex});
 
   @override
+  State<_ExerciseCard> createState() => _ExerciseCardState();
+}
+
+class _ExerciseCardState extends State<_ExerciseCard> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true; // <--- KEY FIX: Always keep this alive
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context); // Required by Mixin
+
     final apiKey = dotenv.env['EXERCISE_API_KEY'] ?? '';
     final apiHost = dotenv.env['EXERCISE_API_HOST'] ?? 'exercisedb.p.rapidapi.com';
 
@@ -1117,17 +1187,14 @@ class _ExerciseCard extends StatelessWidget {
           }
         : null;
 
-    final thumbUrl = _exerciseGifUrl(ex.id, resolution: 180);
+    final thumbUrl = _exerciseGifUrl(widget.ex.id, resolution: 180);
 
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: kCardSurface.withOpacity(0.6),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.black12),
-        boxShadow: const [
-          BoxShadow(blurRadius: 16, offset: Offset(0, 6), color: Color(0x14000000)),
-        ],
+        border: Border.all(color: kGlassBorder),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1137,21 +1204,15 @@ class _ExerciseCard extends StatelessWidget {
             child: Container(
               width: 90,
               height: 90,
-              color: const Color(0xFFF1ECFF),
-              child: ex.id.trim().isEmpty
-                  ? const Center(child: Icon(Icons.image_not_supported, color: Colors.black26))
+              color: Colors.black12,
+              child: widget.ex.id.trim().isEmpty
+                  ? const Center(child: Icon(Icons.image_not_supported, color: kTextGrey))
                   : Image.network(
                       thumbUrl,
                       headers: headers,
                       fit: BoxFit.cover,
-                      loadingBuilder: (context, child, loadingProgress) {
-                        if (loadingProgress == null) return child;
-                        return const Center(child: Icon(Icons.image, color: Colors.black12));
-                      },
-                      errorBuilder: (_, error, __) {
-                        debugPrint('[LIST IMAGE ERROR] ${ex.name}: $thumbUrl\nError: $error');
-                        return const Center(child: Icon(Icons.broken_image, color: Colors.black26));
-                      },
+                      // We don't need fancy loading/error here because the widget won't rebuild often
+                      errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image, color: kTextGrey)),
                     ),
             ),
           ),
@@ -1161,17 +1222,17 @@ class _ExerciseCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _prettyName(ex.name),
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
+                  _prettyName(widget.ex.name),
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: kTextWhite),
                 ),
                 const SizedBox(height: 8),
                 Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                  spacing: 6,
+                  runSpacing: 6,
                   children: [
-                    _Pill('Body: ${ex.bodyPart}'),
-                    _Pill('Target: ${ex.target}'),
-                    _Pill('Equip: ${ex.equipment}'),
+                    _Pill('Body: ${widget.ex.bodyPart}'),
+                    _Pill('Target: ${widget.ex.target}'),
+                    _Pill('Equip: ${widget.ex.equipment}'),
                   ],
                 ),
               ],
@@ -1190,13 +1251,16 @@ class _Pill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: const Color(0xFFF1ECFF),
-        borderRadius: BorderRadius.circular(99),
-        border: Border.all(color: Colors.black12),
+        color: kAccentCyan.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: kAccentCyan.withOpacity(0.3)),
       ),
-      child: Text(text, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+      child: Text(
+        text, 
+        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kAccentCyan)
+      ),
     );
   }
 }
@@ -1212,9 +1276,9 @@ class _WorkoutProgress extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: kCardSurface.withOpacity(0.6),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black12),
+        border: Border.all(color: kGlassBorder),
       ),
       child: Row(
         children: [
@@ -1224,12 +1288,13 @@ class _WorkoutProgress extends StatelessWidget {
               child: LinearProgressIndicator(
                 value: progress,
                 minHeight: 10,
-                backgroundColor: const Color(0xFFF1ECFF),
+                backgroundColor: Colors.white.withOpacity(0.1),
+                valueColor: const AlwaysStoppedAnimation(kAccentCyan),
               ),
             ),
           ),
           const SizedBox(width: 10),
-          Text('$done/$total', style: const TextStyle(fontWeight: FontWeight.w900)),
+          Text('$done/$total', style: const TextStyle(fontWeight: FontWeight.bold, color: kTextWhite)),
         ],
       ),
     );
@@ -1241,12 +1306,14 @@ class _InfoBanner extends StatelessWidget {
   final String text;
   final String? actionText;
   final VoidCallback? onAction;
+  final Color color;
 
   const _InfoBanner({
     required this.icon,
     required this.text,
     this.actionText,
     this.onAction,
+    this.color = kAccentCyan,
   });
 
   @override
@@ -1254,17 +1321,20 @@ class _InfoBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: color.withOpacity(0.15),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black12),
+        border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Row(
         children: [
-          Icon(icon),
+          Icon(icon, color: color),
           const SizedBox(width: 10),
-          Expanded(child: Text(text, style: const TextStyle(fontWeight: FontWeight.w900))),
+          Expanded(child: Text(text, style: TextStyle(fontWeight: FontWeight.bold, color: color))),
           if (actionText != null && onAction != null)
-            TextButton(onPressed: onAction, child: Text(actionText!)),
+            TextButton(
+              onPressed: onAction, 
+              child: Text(actionText!, style: TextStyle(color: color))
+            ),
         ],
       ),
     );
@@ -1281,11 +1351,11 @@ class _SkeletonBox extends StatelessWidget {
       height: height,
       width: double.infinity,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: kCardSurface.withOpacity(0.6),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black12),
+        border: Border.all(color: kGlassBorder),
       ),
-      child: const Center(child: LinearProgressIndicator(minHeight: 3)),
+      child: Center(child: LinearProgressIndicator(minHeight: 3, color: kAccentCyan.withOpacity(0.5))),
     );
   }
 }

@@ -1,10 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:ui'; // For ImageFilter
-import 'calorie_page.dart'; // Navigation
 import 'services/notification_service.dart';
-import 'personalized_exercise_screen.dart'; // Navigation
-import 'home_page.dart'; // Navigation
 
 // --- GLOSSY DESIGN CONSTANTS (MATCHING HOME & NUTRITION PAGE) ---
 const Color kDarkTeal = Color(0xFF132F38); 
