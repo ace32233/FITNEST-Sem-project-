@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:ui';
+import 'dart:math' as math;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:pedometer/pedometer.dart'; // REQUIRED
-import 'package:permission_handler/permission_handler.dart'; // REQUIRED
+import 'package:pedometer/pedometer.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'dart:async';
 
-// --- IMPORT YOUR OTHER PAGES HERE ---
+// --- IMPORTS ---
 import 'intro_page.dart';
 import 'calorie_page.dart'; 
 import 'water_reminder.dart'; 
@@ -25,11 +26,95 @@ const Color kAccentBlue = Color(0xFF3B82F6);
 const Color kTextWhite = Colors.white;
 const Color kTextGrey = Color(0xFF94A3B8);
 
+// --- DATA MODEL FOR PRE-LOADING ---
+class DashboardData {
+  final int waterIntake;
+  final int waterGoal;
+  final int calories;
+  final int caloriesGoal;
+  final int protein;
+  final int proteinGoal;
+  final int carbs;
+  final int carbsGoal;
+  final int fat;
+  final int fatGoal;
+  final int streak;
+
+  DashboardData({
+    this.waterIntake = 0,
+    this.waterGoal = 3000,
+    this.calories = 0,
+    this.caloriesGoal = 2500,
+    this.protein = 0,
+    this.proteinGoal = 150,
+    this.carbs = 0,
+    this.carbsGoal = 250,
+    this.fat = 0,
+    this.fatGoal = 70,
+    this.streak = 0,
+  });
+}
+
 // ==========================================
-// 1. THE MAIN CONTROLLER (THE SHELL)
+// 1. THE MAIN CONTROLLER (STATE CONTAINER)
 // ==========================================
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final DashboardData? initialData; // Added to accept pre-loaded data
+
+  const HomePage({super.key, this.initialData});
+
+  // --- STATIC PRE-LOADER ---
+  static Future<DashboardData> preloadData() async {
+    try {
+      final supabase = Supabase.instance.client;
+      final userId = supabase.auth.currentUser?.id;
+      if (userId == null) return DashboardData();
+
+      final today = DateTime.now().toIso8601String().split('T')[0];
+      final goalsService = UserGoalsService();
+
+      // 1. Parallel Fetching for Speed
+      final results = await Future.wait<dynamic>([
+        goalsService.getUserGoals(), // 0: Goals
+        supabase.from('daily_activities').select().eq('user_id', userId).eq('activity_date', today).maybeSingle() as Future<Map<String, dynamic>?>, // 1: Water
+        supabase.from('meal_logs').select().eq('user_id', userId).gte('activity_date', today).lt('activity_date', DateTime.now().add(const Duration(days: 1)).toIso8601String().split('T')[0]) as Future<List<dynamic>>, // 2: Meals
+        supabase.from('user_streaks').select().eq('user_id', userId).maybeSingle() as Future<Map<String, dynamic>?>, // 3: Streak
+      ]);
+
+      // 2. Parse Results
+      final goals = results[0] as Map<String, dynamic>?;
+      final activity = results[1] as Map<String, dynamic>?;
+      final meals = results[2] as List<dynamic>;
+      final streakRes = results[3] as Map<String, dynamic>?;
+
+      // 3. Calculate Totals
+      double cals = 0, prot = 0, carbs = 0, fat = 0;
+      for (var m in meals) {
+        cals += (m['calories'] ?? 0);
+        prot += (m['protein_g'] ?? 0);
+        carbs += (m['carbs_g'] ?? 0);
+        fat += (m['fat_g'] ?? 0);
+      }
+
+      // 4. Return Data Object
+      return DashboardData(
+        waterIntake: (activity?['water_intake_ml'] ?? 0).toInt(),
+        waterGoal: (activity?['water_goal_ml'] ?? 3000).toInt(),
+        calories: cals.toInt(),
+        caloriesGoal: (goals?['calories_goal'] ?? 2500).toInt(),
+        protein: prot.toInt(),
+        proteinGoal: (goals?['protein_goal_g'] ?? 150).toInt(),
+        carbs: carbs.toInt(),
+        carbsGoal: (goals?['carbs_goal_g'] ?? 250).toInt(),
+        fat: fat.toInt(),
+        fatGoal: (goals?['fat_goal_g'] ?? 70).toInt(),
+        streak: (streakRes?['current_streak'] ?? 0).toInt(),
+      );
+    } catch (e) {
+      debugPrint("Error pre-loading data: $e");
+      return DashboardData(); // Return empty defaults on error
+    }
+  }
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -37,6 +122,43 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _selectedIndex = 0;
+  final _supabase = Supabase.instance.client;
+
+  // State Variables (Initialized with widget.initialData if present)
+  late int _waterIntake;
+  late int _waterGoal;
+  late int _caloriesConsumed;
+  late int _caloriesGoal;
+  late int _proteinConsumed;
+  late int _proteinGoal;
+  late int _fatConsumed;
+  late int _fatGoal;
+  late int _carbsConsumed;
+  late int _carbsGoal;
+  late int _currentStreak;
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize from pre-loaded data OR defaults
+    final data = widget.initialData ?? DashboardData();
+    _waterIntake = data.waterIntake;
+    _waterGoal = data.waterGoal;
+    _caloriesConsumed = data.calories;
+    _caloriesGoal = data.caloriesGoal;
+    _proteinConsumed = data.protein;
+    _proteinGoal = data.proteinGoal;
+    _fatConsumed = data.fat;
+    _fatGoal = data.fatGoal;
+    _carbsConsumed = data.carbs;
+    _carbsGoal = data.carbsGoal;
+    _currentStreak = data.streak;
+
+    // If no initial data was passed (e.g. hot reload), fetch it now
+    if (widget.initialData == null) {
+      _refreshData(); 
+    }
+  }
 
   void _onItemTapped(int index) {
     setState(() {
@@ -44,17 +166,60 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  // Allow re-fetching (pull to refresh)
+  Future<void> _refreshData() async {
+    final data = await HomePage.preloadData();
+    if(mounted) {
+      setState(() {
+         _waterIntake = data.waterIntake;
+        _waterGoal = data.waterGoal;
+        _caloriesConsumed = data.calories;
+        _caloriesGoal = data.caloriesGoal;
+        _proteinConsumed = data.protein;
+        _proteinGoal = data.proteinGoal;
+        _fatConsumed = data.fat;
+        _fatGoal = data.fatGoal;
+        _carbsConsumed = data.carbs;
+        _carbsGoal = data.carbsGoal;
+        _currentStreak = data.streak;
+      });
+    }
+  }
+
+  void _updateWater(int newAmount) {
+    setState(() => _waterIntake = newAmount);
+  }
+
+  void _updateNutrition(double cals, double prot, double carbs, double fat) {
+    setState(() {
+      _caloriesConsumed = cals.toInt();
+      _proteinConsumed = prot.toInt();
+      _carbsConsumed = carbs.toInt();
+      _fatConsumed = fat.toInt();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final List<Widget> pages = [
       HomeDashboard(
-        isVisible: _selectedIndex == 0, 
-        onNavigate: _onItemTapped, 
-      ), 
-      const NutritionPage(),              
-      const PersonalizedExerciseScreen(), 
-      const WaterTrackerPage(),           
-      const ProfilePage(),                
+        onNavigate: _onItemTapped,
+        waterIntake: _waterIntake,
+        waterGoal: _waterGoal,
+        calories: _caloriesConsumed,
+        caloriesGoal: _caloriesGoal,
+        protein: _proteinConsumed,
+        proteinGoal: _proteinGoal,
+        carbs: _carbsConsumed,
+        carbsGoal: _carbsGoal,
+        fat: _fatConsumed,
+        fatGoal: _fatGoal,
+        streak: _currentStreak, // Pass streak down
+      ),
+      NutritionPage(onDataChanged: _updateNutrition),
+      const PersonalizedExerciseScreen(),
+      WaterTrackerPage(onWaterChanged: _updateWater),
+      const ProfilePage(),
     ];
 
     return Container(
@@ -74,18 +239,12 @@ class _HomePageState extends State<HomePage> {
         bottomNavigationBar: SafeArea(
           child: Container(
             height: 75,
-            margin: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            margin: const EdgeInsets.fromLTRB(10, 0, 10, 20),
             decoration: BoxDecoration(
               color: kDarkSlate.withOpacity(0.95),
               borderRadius: BorderRadius.circular(25),
               border: Border.all(color: kGlassBorder, width: 0.5),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.4),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
-                ),
-              ],
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 20, offset: const Offset(0, 10))],
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(25),
@@ -125,20 +284,9 @@ class _HomePageState extends State<HomePage> {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              icon, 
-              size: 24, 
-              color: isActive ? kAccentCyan : kTextGrey.withOpacity(0.7)
-            ),
+            Icon(icon, size: 24, color: isActive ? kAccentCyan : kTextGrey.withOpacity(0.7)),
             const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-                color: isActive ? kAccentCyan : kTextGrey.withOpacity(0.7),
-              ),
-            ),
+            Text(label, style: TextStyle(fontSize: 10, fontWeight: isActive ? FontWeight.bold : FontWeight.normal, color: isActive ? kAccentCyan : kTextGrey.withOpacity(0.7))),
           ],
         ),
       ),
@@ -147,16 +295,36 @@ class _HomePageState extends State<HomePage> {
 }
 
 // ==========================================
-// 2. THE HOME DASHBOARD
+// 2. THE DASHBOARD (UPDATED)
 // ==========================================
 class HomeDashboard extends StatefulWidget {
-  final bool isVisible;
   final Function(int) onNavigate;
+  final int waterIntake;
+  final int waterGoal;
+  final int calories;
+  final int caloriesGoal;
+  final int protein;
+  final int proteinGoal;
+  final int carbs;
+  final int carbsGoal;
+  final int fat;
+  final int fatGoal;
+  final int streak; // Added streak param
 
   const HomeDashboard({
-    super.key, 
-    required this.isVisible, 
-    required this.onNavigate
+    super.key,
+    required this.onNavigate,
+    required this.waterIntake,
+    required this.waterGoal,
+    required this.calories,
+    required this.caloriesGoal,
+    required this.protein,
+    required this.proteinGoal,
+    required this.carbs,
+    required this.carbsGoal,
+    required this.fat,
+    required this.fatGoal,
+    required this.streak,
   });
 
   @override
@@ -164,257 +332,45 @@ class HomeDashboard extends StatefulWidget {
 }
 
 class _HomeDashboardState extends State<HomeDashboard> {
-  final _supabase = Supabase.instance.client;
-  final _goalsService = UserGoalsService();
-
-  // Data variables
-  int _currentStreak = 0;
-  int _steps = 0; // Displayed Steps
-  int _caloriesConsumed = 0;
-  int _caloriesGoal = 2500;
-  int _proteinConsumed = 0;
-  int _proteinGoal = 150;
-  int _fatConsumed = 0;
-  int _fatGoal = 70;
-  int _carbsConsumed = 0;
-  int _carbsGoal = 250;
-  int _waterIntake = 0;
-  int _waterGoal = 3000;
-
-  // Step counter Logic
+  int _steps = 0; 
+  int _stepGoal = 10000;
   late StreamSubscription<StepCount> _stepCountSubscription;
-  String _status = '?';
 
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _loadLocalSettings();
     _initPedometer();
   }
 
-  @override
-  void didUpdateWidget(HomeDashboard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.isVisible && !oldWidget.isVisible) {
-      _loadData();
-    }
+  Future<void> _loadLocalSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    if(mounted) setState(() => _stepGoal = prefs.getInt('daily_step_goal') ?? 10000);
   }
 
-  @override
-  void dispose() {
-    try {
-      _stepCountSubscription.cancel();
-    } catch (e) { /* ignore */ }
-    super.dispose();
-  }
-
-  // --- PEDOMETER LOGIC ---
   Future<void> _initPedometer() async {
-    // 1. Request Permission
-    final status = await Permission.activityRecognition.request();
-    if (status.isDenied || status.isPermanentlyDenied) {
-      setState(() => _status = 'Permission Denied');
-      return;
+    if (await Permission.activityRecognition.request().isGranted) {
+      _stepCountSubscription = Pedometer.stepCountStream.listen(_onStepCount, onError: (e) {});
     }
-
-    // 2. Start Stream
-    _stepCountSubscription = Pedometer.stepCountStream.listen(
-      _onStepCount,
-      onError: _onStepCountError,
-    );
   }
 
   void _onStepCount(StepCount event) async {
     final prefs = await SharedPreferences.getInstance();
-    
-    // Get today's date key (yyyy-mm-dd)
-    final now = DateTime.now();
-    final todayKey = "${now.year}-${now.month}-${now.day}";
-    
-    // Get saved "baseline" steps (steps at start of day)
-    int? savedStepsAtMidnight = prefs.getInt('steps_at_midnight_$todayKey');
-    
-    // If no baseline for today exists, save current phone steps as baseline
-    if (savedStepsAtMidnight == null) {
-      savedStepsAtMidnight = event.steps;
+    final todayKey = "${DateTime.now().year}-${DateTime.now().month}-${DateTime.now().day}";
+    int? baseline = prefs.getInt('steps_at_midnight_$todayKey');
+    if (baseline == null) {
+      baseline = event.steps;
       await prefs.setInt('steps_at_midnight_$todayKey', event.steps);
     }
-
-    // Calculate actual steps today = (Total Phone Steps - Baseline)
-    int stepsToday = event.steps - savedStepsAtMidnight;
-    
-    // Handle phone reboot (Total steps might reset to 0, becoming less than baseline)
-    if (stepsToday < 0) {
-      stepsToday = event.steps; // Assume 0 baseline if rebooted
-      await prefs.setInt('steps_at_midnight_$todayKey', 0);
-    }
-
-    if (mounted) {
-      setState(() {
-        _steps = stepsToday;
-        _status = 'Active';
-      });
-    }
+    int todaySteps = event.steps - baseline;
+    if (todaySteps < 0) { todaySteps = event.steps; await prefs.setInt('steps_at_midnight_$todayKey', 0); }
+    if (mounted) setState(() => _steps = todaySteps);
   }
 
-  void _onStepCountError(error) {
-    debugPrint('Step Count Error: $error');
-    if (mounted) setState(() => _status = 'Sensor Error');
-  }
-  // -----------------------
-
-  Future<void> _loadData() async {
-    try {
-      final userId = _supabase.auth.currentUser?.id;
-      if (userId == null) return;
-
-      final goalsData = await _goalsService.getUserGoals();
-      if (goalsData != null && mounted) {
-        setState(() {
-          _caloriesGoal = goalsData['calories_goal'] ?? 2500;
-          _proteinGoal = goalsData['protein_goal_g'] ?? 150;
-          _carbsGoal = goalsData['carbs_goal_g'] ?? 250;
-          _fatGoal = goalsData['fat_goal_g'] ?? 70;
-        });
-      }
-
-      final streakRes = await _supabase
-          .from('user_streaks')
-          .select()
-          .eq('user_id', userId)
-          .maybeSingle();
-      
-      int serverStreak = streakRes != null ? (streakRes['current_streak'] ?? 0) : 0;
-
-      final lastWorkoutRes = await _supabase
-          .from('workout_logs')
-          .select('activity_date')
-          .eq('user_id', userId)
-          .order('activity_date', ascending: false)
-          .limit(1)
-          .maybeSingle();
-
-      if (lastWorkoutRes != null) {
-        final lastDateStr = lastWorkoutRes['activity_date'] as String;
-        final lastDate = DateTime.parse(lastDateStr);
-        final now = DateTime.now();
-        final today = DateTime(now.year, now.month, now.day);
-        final last = DateTime(lastDate.year, lastDate.month, lastDate.day);
-        
-        final diff = today.difference(last).inDays;
-        if (diff > 1) serverStreak = 0;
-      } else {
-        serverStreak = 0;
-      }
-
-      if (mounted) {
-        setState(() {
-          _currentStreak = serverStreak;
-        });
-      }
-
-      final todayStr = DateTime.now().toIso8601String().split('T')[0];
-      final activityData = await _supabase
-          .from('daily_activities')
-          .select()
-          .eq('user_id', userId)
-          .eq('activity_date', todayStr)
-          .maybeSingle();
-
-      if (activityData != null && mounted) {
-        setState(() {
-          _waterIntake = activityData['water_intake_ml'] ?? 0;
-          _waterGoal = activityData['water_goal_ml'] ?? 3000;
-        });
-      }
-
-      final nutritionTotals = await _supabase
-          .from('meal_logs')
-          .select('calories, protein_g, carbs_g, fat_g')
-          .eq('user_id', userId)
-          .gte('activity_date', todayStr)
-          .lt('activity_date', DateTime.now().add(const Duration(days: 1)).toIso8601String().split('T')[0]);
-
-      if (nutritionTotals.isNotEmpty && mounted) {
-        double totalCalories = 0;
-        double totalProtein = 0;
-        double totalCarbs = 0;
-        double totalFat = 0;
-
-        for (var meal in nutritionTotals) {
-          totalCalories += (meal['calories'] ?? 0).toDouble();
-          totalProtein += (meal['protein_g'] ?? 0).toDouble();
-          totalCarbs += (meal['carbs_g'] ?? 0).toDouble();
-          totalFat += (meal['fat_g'] ?? 0).toDouble();
-        }
-
-        setState(() {
-          _caloriesConsumed = totalCalories.toInt();
-          _proteinConsumed = totalProtein.toInt();
-          _carbsConsumed = totalCarbs.toInt();
-          _fatConsumed = totalFat.toInt();
-        });
-      }
-    } catch (e) {
-      debugPrint('Error loading data: $e');
-    }
-  }
-
-  Future<void> _showSignOutDialog() async {
-    return showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(25),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: AlertDialog(
-              backgroundColor: const Color(0xFF1E293B).withOpacity(0.95),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(25),
-                  side: const BorderSide(color: kGlassBorder)
-              ),
-              title: const Text('Sign Out', style: TextStyle(color: kTextWhite, fontWeight: FontWeight.bold)),
-              content: const Text('Are you sure you want to sign out?', style: TextStyle(color: kTextGrey)),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel', style: TextStyle(color: kTextGrey)),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                    _signOut();
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red.withOpacity(0.8),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  child: const Text('Sign Out'),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _signOut() async {
-    try {
-      await _supabase.auth.signOut();
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.clear();
-      if (mounted) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => const IntroPage()),
-          (route) => false,
-        );
-      }
-    } catch (e) {
-      debugPrint('Error signing out: $e');
-    }
+  @override
+  void dispose() {
+    try { _stepCountSubscription.cancel(); } catch(e){}
+    super.dispose();
   }
 
   String getGreeting() {
@@ -422,6 +378,36 @@ class _HomeDashboardState extends State<HomeDashboard> {
     if (hour < 12) return "Good Morning";
     if (hour < 17) return "Good Afternoon";
     return "Good Evening";
+  }
+
+  // --- Step Goal Dialog ---
+  void _showStepGoalDialog() {
+    final controller = TextEditingController(text: _stepGoal.toString());
+    showDialog(
+      context: context,
+      builder: (context) => ClipRRect(
+        borderRadius: BorderRadius.circular(25),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: AlertDialog(
+            backgroundColor: kCardSurface.withOpacity(0.95),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25), side: const BorderSide(color: kGlassBorder)),
+            title: const Text('Set Daily Step Goal', style: TextStyle(color: kTextWhite)),
+            content: TextField(controller: controller, keyboardType: TextInputType.number, style: const TextStyle(color: kTextWhite), decoration: InputDecoration(filled: true, fillColor: Colors.white.withOpacity(0.05))),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: kTextGrey))),
+              ElevatedButton(onPressed: () async {
+                final newGoal = int.tryParse(controller.text) ?? 10000;
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setInt('daily_step_goal', newGoal);
+                setState(() => _stepGoal = newGoal);
+                if(mounted) Navigator.pop(context);
+              }, style: ElevatedButton.styleFrom(backgroundColor: kAccentCyan, foregroundColor: kDarkSlate), child: const Text('Save')),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -437,69 +423,45 @@ class _HomeDashboardState extends State<HomeDashboard> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                getGreeting(),
-                style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: kTextWhite, letterSpacing: -0.5),
-              ),
+              Text(getGreeting(), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: kTextWhite, letterSpacing: -0.5)),
               const SizedBox(height: 4),
               Row(
                 children: [
-                  Icon(Icons.local_fire_department_rounded, size: 16, color: _currentStreak > 0 ? Colors.orange : kTextGrey),
+                  Icon(Icons.local_fire_department_rounded, size: 16, color: widget.streak > 0 ? Colors.orange : kTextGrey),
                   const SizedBox(width: 4),
-                  Text(
-                    _currentStreak > 0 ? "$_currentStreak Day Streak" : "Start your streak!",
-                    style: TextStyle(fontSize: 14, color: _currentStreak > 0 ? kTextWhite : kTextGrey, fontWeight: FontWeight.w500),
-                  ),
+                  Text(widget.streak > 0 ? "${widget.streak} Day Streak" : "Start your streak!", style: TextStyle(fontSize: 14, color: widget.streak > 0 ? kTextWhite : kTextGrey, fontWeight: FontWeight.w500)),
                 ],
               ),
             ],
           ),
         ),
-        actions: [
-          Container(
-            margin: const EdgeInsets.only(right: 20),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.05),
-              borderRadius: BorderRadius.circular(15),
-              border: Border.all(color: kGlassBorder),
-            ),
-            child: IconButton(
-              icon: const Icon(Icons.logout_rounded, color: kTextGrey, size: 20),
-              onPressed: _showSignOutDialog,
-            ),
-          ),
-        ],
       ),
-      body: RefreshIndicator(
-        onRefresh: _loadData,
-        color: kAccentCyan,
-        child: SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-          child: Column(
-            children: [
-              GlossyCalorieCard(
-                consumed: _caloriesConsumed,
-                goal: _caloriesGoal,
-                protein: _proteinConsumed,
-                proteinGoal: _proteinGoal,
-                fat: _fatConsumed,
-                fatGoal: _fatGoal,
-                carbs: _carbsConsumed,
-                carbsGoal: _carbsGoal,
-                onTap: () => widget.onNavigate(1), 
-              ),
-              const SizedBox(height: 20),
-              GlossyWaterCard(
-                consumed: _waterIntake,
-                goal: _waterGoal,
-                onTap: () => widget.onNavigate(3), 
-              ),
-              const SizedBox(height: 20),
-              GlossyStepsCard(steps: _steps),
-              const SizedBox(height: 120),
-            ],
-          ),
+      body: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        child: Column(
+          children: [
+            GlossyCalorieCard(
+              consumed: widget.calories,
+              goal: widget.caloriesGoal,
+              protein: widget.protein,
+              proteinGoal: widget.proteinGoal,
+              fat: widget.fat,
+              fatGoal: widget.fatGoal,
+              carbs: widget.carbs,
+              carbsGoal: widget.carbsGoal,
+              onTap: () => widget.onNavigate(1), 
+            ),
+            const SizedBox(height: 20),
+            GlossyWaterCard(
+              consumed: widget.waterIntake,
+              goal: widget.waterGoal,
+              onTap: () => widget.onNavigate(3), 
+            ),
+            const SizedBox(height: 20),
+            GlossyStepsCard(steps: _steps, goal: _stepGoal, onEdit: _showStepGoalDialog),
+            const SizedBox(height: 120),
+          ],
         ),
       ),
     );
@@ -508,8 +470,6 @@ class _HomeDashboardState extends State<HomeDashboard> {
 
 // --- WIDGETS ---
 
-// (Keep GlossyCalorieCard, GlossyWaterCard, GlossyStepsCard the same as defined in previous messages or this context)
-// Re-adding GlossyCalorieCard just in case it was missed in this context window
 class GlossyCalorieCard extends StatelessWidget {
   final int consumed;
   final int goal;
@@ -757,42 +717,6 @@ class GlossyCalorieCard extends StatelessWidget {
   }
 }
 
-class GlossyMacroTile extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-
-  const GlossyMacroTile(this.label, this.value, this.color, {super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: const TextStyle(color: kTextWhite, fontWeight: FontWeight.w700, fontSize: 15),
-        ),
-        const SizedBox(height: 4),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 6,
-              height: 6,
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle, boxShadow: [BoxShadow(color: color.withOpacity(0.6), blurRadius: 4)]),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(color: kTextGrey.withOpacity(0.8), fontSize: 12),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
 class GlossyWaterCard extends StatelessWidget {
   final int consumed;
   final int goal;
@@ -867,7 +791,15 @@ class GlossyWaterCard extends StatelessWidget {
 
 class GlossyStepsCard extends StatelessWidget {
   final int steps;
-  const GlossyStepsCard({super.key, required this.steps});
+  final int goal;
+  final VoidCallback onEdit;
+
+  const GlossyStepsCard({
+    super.key, 
+    required this.steps, 
+    required this.goal,
+    required this.onEdit,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -894,13 +826,23 @@ class GlossyStepsCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text("Steps", style: TextStyle(color: kTextWhite, fontSize: 16, fontWeight: FontWeight.w600)),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text("Steps", style: TextStyle(color: kTextWhite, fontSize: 16, fontWeight: FontWeight.w600)),
+                    GestureDetector(
+                      onTap: onEdit,
+                      child: const Icon(Icons.edit_rounded, color: kTextGrey, size: 16),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 4),
                 RichText(
                   text: TextSpan(
                     children: [
                       TextSpan(text: "$steps", style: const TextStyle(color: kTextWhite, fontWeight: FontWeight.bold)),
-                      TextSpan(text: " / 10k", style: TextStyle(color: kTextGrey.withOpacity(0.7))),
+                      // --- MODIFIED: Uses dynamic goal ---
+                      TextSpan(text: " / ${_formatGoal(goal)}", style: TextStyle(color: kTextGrey.withOpacity(0.7))),
                     ],
                   ),
                 ),
@@ -913,12 +855,20 @@ class GlossyStepsCard extends StatelessWidget {
             decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
             child: FractionallySizedBox(
               alignment: Alignment.centerLeft,
-              widthFactor: (steps / 10000).clamp(0.0, 1.0),
+              // --- MODIFIED: Uses dynamic goal calculation ---
+              widthFactor: (goal > 0 ? steps / goal : 0.0).clamp(0.0, 1.0),
               child: Container(decoration: BoxDecoration(color: Colors.pinkAccent, borderRadius: BorderRadius.circular(10))),
             ),
           ),
         ],
       ),
     );
+  }
+
+  String _formatGoal(int goal) {
+    if (goal >= 1000) {
+      return "${(goal / 1000).toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')}k";
+    }
+    return "$goal";
   }
 }

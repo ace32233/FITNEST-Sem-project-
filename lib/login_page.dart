@@ -3,8 +3,16 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'signup_page.dart';
-import 'gender_page.dart';
-import 'home_page.dart';
+import 'intro_page.dart'; // FIX: Import IntroPage for loading logic
+
+// --- GLOSSY DESIGN CONSTANTS ---
+const Color kDarkTeal = Color(0xFF132F38); 
+const Color kDarkSlate = Color(0xFF0F172A); 
+const Color kCardSurface = Color(0xFF1E293B); 
+const Color kGlassBorder = Color(0x33FFFFFF); 
+const Color kAccentCyan = Color(0xFF22D3EE); 
+const Color kTextWhite = Colors.white;
+const Color kTextGrey = Color(0xFF94A3B8);
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -35,8 +43,11 @@ class _LoginPageState extends State<LoginPage> {
     final session = supabase.auth.currentSession;
 
     if (session != null && rememberMe && mounted) {
-      // Check if user has completed onboarding
-      await _navigateBasedOnOnboarding();
+      // If session exists, go to IntroPage for data loading
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const IntroPage(isPostLogin: true)),
+      );
     }
   }
 
@@ -69,11 +80,15 @@ class _LoginPageState extends State<LoginPage> {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('remember_me', _rememberMe);
 
-        // Ensure profile exists (in case it wasn't created by trigger)
+        // Ensure profile exists
         await _ensureProfileExists(response.user!);
 
-        // Navigate based on onboarding status
-        await _navigateBasedOnOnboarding();
+        // FIX: Navigate to IntroPage (Loading Screen) instead of direct Home/Onboarding check
+        // The IntroPage/HomePage will handle fetching data.
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const IntroPage(isPostLogin: true)),
+        );
       }
     } on AuthException catch (e) {
       _showError(e.message);
@@ -89,14 +104,12 @@ class _LoginPageState extends State<LoginPage> {
   // Ensure profile exists for the user
   Future<void> _ensureProfileExists(User user) async {
     try {
-      // Check if profile exists
       final profileResponse = await supabase
           .from('profiles')
           .select()
           .eq('id', user.id)
           .maybeSingle();
 
-      // If no profile exists, create one
       if (profileResponse == null) {
         await supabase.from('profiles').insert({
           'id': user.id,
@@ -104,59 +117,20 @@ class _LoginPageState extends State<LoginPage> {
           'email': user.email ?? '',
           'created_at': DateTime.now().toIso8601String(),
         });
-        debugPrint('Profile created for user: ${user.id}');
       }
     } catch (e) {
       debugPrint('Error ensuring profile exists: $e');
     }
   }
 
-  // Check if user completed onboarding and navigate accordingly
-  Future<void> _navigateBasedOnOnboarding() async {
-    try {
-      final user = supabase.auth.currentUser;
-      if (user == null) return;
-
-      // Ensure profile exists
-      await _ensureProfileExists(user);
-
-      // Check if user has completed fitness onboarding
-      final fitnessResponse = await supabase
-          .from('user_fitness')
-          .select()
-          .eq('id', user.id)
-          .maybeSingle();
-
-      if (!mounted) return;
-
-      if (fitnessResponse == null) {
-        // First time user - go to onboarding
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const GenderScreen()),
-        );
-      } else {
-        // Returning user - go to home
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const HomePage()),
-        );
-      }
-    } catch (e) {
-      debugPrint('Error checking onboarding: $e');
-      // Default to onboarding if error
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const GenderScreen()),
-        );
-      }
-    }
-  }
-
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(backgroundColor: Colors.red, content: Text(message)),
+      SnackBar(
+        content: Text(message, style: const TextStyle(color: Colors.white)),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
     );
   }
 
@@ -164,168 +138,185 @@ class _LoginPageState extends State<LoginPage> {
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFE4FBD6),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: EdgeInsets.symmetric(horizontal: size.width * 0.05),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 10),
-
-              // Title
-              Center(
-                child: Text(
-                  "Login",
-                  style: GoogleFonts.pacifico(
-                    fontSize: size.width * 0.13,
-                    letterSpacing: 3,
-                    color: Color(0xFF3A3016),
-                  ),
-                ),
-              ),
-
-              SizedBox(height: size.height * 0.04),
-
-              _buildField("Email", _emailController, "Enter Email"),
-              SizedBox(height: size.height * 0.025),
-
-              _buildField(
-                "Password",
-                _passwordController,
-                "Enter Password",
-                obscure: true,
-              ),
-
-              SizedBox(height: size.height * 0.02),
-
-              // Remember Me
-              Row(
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [kDarkSlate, kDarkTeal], // Glossy Background
+        ),
+      ),
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.symmetric(horizontal: size.width * 0.08),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Checkbox(
-                    value: _rememberMe,
-                    activeColor: const Color(0xFF3A3016),
-                    onChanged: (v) => setState(() => _rememberMe = v ?? false),
-                  ),
-                  Text(
-                    "Remember Me",
-                    style: _textStyle(14, Color(0xFF3A3016)),
-                  ),
-                ],
-              ),
-
-              SizedBox(height: size.height * 0.03),
-
-              // Login Button
-              Center(
-                child: SizedBox(
-                  width: size.width * 0.6,
-                  height: size.height * 0.055,
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _login,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      disabledBackgroundColor: Colors.white70,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                    ),
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(Colors.black),
-                            ),
-                          )
-                        : Text(
-                            "Log In",
-                            style: _textStyle(
-                              20,
-                              const Color(0xFF0D2847),
-                              FontWeight.w600,
-                            ),
-                          ),
-                  ),
-                ),
-              ),
-
-              SizedBox(height: size.height * 0.04),
-
-              // Sign Up
-              Center(
-                child: GestureDetector(
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const SignUpPage()),
-                  ),
-                  child: Text.rich(
-                    TextSpan(
-                      text: "Don't have an account? ",
-                      style: _textStyle(16),
-                      children: [
-                        TextSpan(
-                          text: "Sign Up",
-                          style: _textStyle(
-                            16,
-                            Colors.orange,
-                            FontWeight.w500,
-                          ),
+                  // Logo / Icon
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: kCardSurface.withOpacity(0.5),
+                      border: Border.all(color: kGlassBorder),
+                      boxShadow: [
+                        BoxShadow(
+                          color: kAccentCyan.withOpacity(0.2),
+                          blurRadius: 30,
+                          spreadRadius: 5,
                         ),
                       ],
                     ),
+                    child: const Icon(Icons.fitness_center_rounded, size: 50, color: kAccentCyan),
                   ),
-                ),
+                  const SizedBox(height: 20),
+
+                  // Title
+                  Text(
+                    "Welcome Back",
+                    style: GoogleFonts.poppins(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: kTextWhite,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "Sign in to continue",
+                    style: TextStyle(color: kTextGrey.withOpacity(0.8), fontSize: 16),
+                  ),
+
+                  SizedBox(height: size.height * 0.05),
+
+                  // Inputs
+                  _buildGlossyTextField(
+                    controller: _emailController,
+                    label: "Email",
+                    icon: Icons.email_outlined,
+                  ),
+                  const SizedBox(height: 16),
+                  _buildGlossyTextField(
+                    controller: _passwordController,
+                    label: "Password",
+                    icon: Icons.lock_outline,
+                    isPassword: true,
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Remember Me
+                  Row(
+                    children: [
+                      SizedBox(
+                        height: 24,
+                        width: 24,
+                        child: Checkbox(
+                          value: _rememberMe,
+                          activeColor: kAccentCyan,
+                          checkColor: kDarkSlate,
+                          side: BorderSide(color: kTextGrey.withOpacity(0.5)),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                          onChanged: (v) => setState(() => _rememberMe = v ?? false),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        "Remember Me",
+                        style: TextStyle(color: kTextGrey, fontSize: 14),
+                      ),
+                    ],
+                  ),
+
+                  SizedBox(height: size.height * 0.04),
+
+                  // Login Button
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: ElevatedButton(
+                      onPressed: _isLoading ? null : _login,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kAccentCyan,
+                        foregroundColor: kDarkSlate,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2.5, color: kDarkSlate),
+                            )
+                          : const Text(
+                              "Sign In",
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // Sign Up Link
+                  GestureDetector(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SignUpPage()),
+                    ),
+                    child: RichText(
+                      text: TextSpan(
+                        text: "Don't have an account? ",
+                        style: const TextStyle(color: kTextGrey),
+                        children: [
+                          TextSpan(
+                            text: "Sign Up",
+                            style: GoogleFonts.poppins(
+                              color: kAccentCyan,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildField(
-    String label,
-    TextEditingController controller,
-    String hint, {
-    bool obscure = false,
+  Widget _buildGlossyTextField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    bool isPassword = false,
   }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: _textStyle(16)),
-        const SizedBox(height: 6),
-        TextField(
-          controller: controller,
-          obscureText: obscure,
-          style: _textStyle(15),
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: const Color(0xFFFFFFFF),
-            hintText: hint,
-            hintStyle: _textStyle(15, Colors.white38),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-          ),
+    return Container(
+      decoration: BoxDecoration(
+        color: kCardSurface.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: kGlassBorder),
+      ),
+      child: TextField(
+        controller: controller,
+        obscureText: isPassword,
+        style: const TextStyle(color: kTextWhite),
+        decoration: InputDecoration(
+          prefixIcon: Icon(icon, color: kTextGrey),
+          labelText: label,
+          labelStyle: const TextStyle(color: kTextGrey),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         ),
-      ],
-    );
-  }
-
-  TextStyle _textStyle(
-    double size, [
-    Color? color,
-    FontWeight? weight,
-  ]) {
-    return GoogleFonts.poppins(
-      fontSize: size,
-      color: color ?? Color(0xFF3A3016),
-      fontWeight: weight,
+      ),
     );
   }
 }

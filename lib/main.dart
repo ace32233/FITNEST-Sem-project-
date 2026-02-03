@@ -5,9 +5,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter/rendering.dart';
 
+// --- PAGE IMPORTS ---
 import 'intro_page.dart';
-import 'gender_page.dart';
+import 'login_page.dart';
 import 'home_page.dart';
+import 'gender_page.dart';
 
 void main() async {
   // Keep your debug flags
@@ -51,122 +53,25 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Fitness App',
-      theme: ThemeData(
-        textTheme: GoogleFonts.poppinsTextTheme(),
+      // --- FIX: Global Dark Theme ---
+      // This ensures backgrounds don't flash white during transitions
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: const Color(0xFF0F172A), // kDarkSlate
+        textTheme: GoogleFonts.poppinsTextTheme(ThemeData.dark().textTheme),
         useMaterial3: true,
       ),
-      home: const AuthGate(),
+      // --- FIX: Set IntroPage as Home ---
+      // IntroPage handles the Auth Check & Loading animation
+      home: const IntroPage(), 
+      
+      // --- FIX: Named Routes ---
+      // Required for Profile Page logout logic
+      routes: {
+        '/intro': (context) => const IntroPage(),
+        '/login': (context) => const LoginPage(),
+        '/home': (context) => const HomePage(),
+        '/onboarding': (context) => const GenderScreen(),
+      },
     );
-  }
-}
-
-/// Auth Gate - Determines where to route user
-class AuthGate extends StatefulWidget {
-  const AuthGate({super.key});
-
-  @override
-  State<AuthGate> createState() => _AuthGateState();
-}
-
-class _AuthGateState extends State<AuthGate> {
-  bool _isLoading = true;
-  Widget _destination = const IntroPage();
-
-  @override
-  void initState() {
-    super.initState();
-
-    // Prevent doing network work before first paint.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkAuthAndOnboarding();
-    });
-  }
-
-  void _go(Widget dest) {
-    if (!mounted) return;
-    setState(() {
-      _destination = dest;
-      _isLoading = false;
-    });
-  }
-
-  Future<void> _checkAuthAndOnboarding() async {
-    try {
-      final supabase = Supabase.instance.client;
-      final session = supabase.auth.currentSession;
-
-      if (session == null) {
-        // Not logged in - show intro page
-        _go(const IntroPage());
-        return;
-      }
-
-      // User is logged in
-      final user = session.user;
-
-      // Ensure profile exists
-      await _ensureProfileExists(user);
-
-      // Check if they completed onboarding
-      final fitnessResponse = await supabase
-          .from('user_fitness')
-          .select()
-          .eq('id', user.id)
-          .maybeSingle();
-
-      if (!mounted) return;
-
-      if (fitnessResponse == null) {
-        // No fitness data - first time user, show onboarding
-        _go(const GenderScreen());
-      } else {
-        // Has fitness data - returning user, go to home
-        _go(const HomePage());
-      }
-    } catch (e) {
-      debugPrint('Error checking auth: $e');
-      _go(const IntroPage());
-    }
-  }
-
-  /// Ensure profile exists for the user
-  Future<void> _ensureProfileExists(User user) async {
-    try {
-      final supabase = Supabase.instance.client;
-
-      // Check if profile exists
-      final profileResponse = await supabase
-          .from('profiles')
-          .select()
-          .eq('id', user.id)
-          .maybeSingle();
-
-      // If no profile exists, create one
-      if (profileResponse == null) {
-        await supabase.from('profiles').insert({
-          'id': user.id,
-          'full_name': user.userMetadata?['full_name'] ?? '',
-          'email': user.email ?? '',
-          'created_at': DateTime.now().toIso8601String(),
-        });
-        debugPrint('Profile created for user: ${user.id}');
-      }
-    } catch (e) {
-      debugPrint('Error ensuring profile exists: $e');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(
-        backgroundColor: Color(0xFF0A2852),
-        body: Center(
-          child: CircularProgressIndicator(color: Colors.white),
-        ),
-      );
-    }
-
-    return _destination;
   }
 }

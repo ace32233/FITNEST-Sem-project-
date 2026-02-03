@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'dart:ui'; // For ImageFilter
+import 'dart:ui'; 
 import 'services/notification_service.dart';
 
-// --- GLOSSY DESIGN CONSTANTS (MATCHING HOME & NUTRITION PAGE) ---
+// --- GLOSSY DESIGN CONSTANTS ---
 const Color kDarkTeal = Color(0xFF132F38); 
 const Color kDarkSlate = Color(0xFF0F172A); 
 const Color kCardSurface = Color(0xFF1E293B); 
@@ -15,14 +15,17 @@ const Color kTextWhite = Colors.white;
 const Color kTextGrey = Color(0xFF94A3B8);
 
 class WaterTrackerPage extends StatefulWidget {
-  const WaterTrackerPage({Key? key}) : super(key: key);
+  // 1. ADDED CALLBACK PARAMETER
+  final Function(int)? onWaterChanged;
+
+  const WaterTrackerPage({Key? key, this.onWaterChanged}) : super(key: key);
 
   @override
   State<WaterTrackerPage> createState() => _WaterTrackerPageState();
 }
 
 class _WaterTrackerPageState extends State<WaterTrackerPage> {
-  // --- BUSINESS LOGIC (UNCHANGED) ---
+  // --- BUSINESS LOGIC ---
   int currentWater = 0;
   int targetWater = 2500;
   int quickAddAmount = 50;
@@ -115,6 +118,8 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
           currentWater = response['water_intake_ml'] ?? 0;
           targetWater = response['water_goal_ml'] ?? 2500;
         });
+        // 2. TRIGGER CALLBACK ON LOAD (To sync if needed)
+        widget.onWaterChanged?.call(currentWater);
       } else {
         await _supabase.from('daily_activities').insert({
           'user_id': userId,
@@ -125,9 +130,6 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
       }
     } catch (e) {
       debugPrint('Error loading water data: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading data: $e')),
-      );
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -184,6 +186,10 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
         currentWater = targetWater;
       }
     });
+    
+    // 3. TRIGGER CALLBACK ON UPDATE
+    widget.onWaterChanged?.call(currentWater);
+    
     _updateWaterIntake();
   }
 
@@ -240,6 +246,9 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                       currentWater = targetWater;
                     }
                   });
+                  
+                  // Trigger update if current changed due to cap
+                  widget.onWaterChanged?.call(currentWater);
 
                   try {
                     final userId = _supabase.auth.currentUser?.id;
@@ -396,12 +405,34 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                           ),
                         ),
                       const SizedBox(height: 16),
+                      // --- GLOSSY BUTTON ---
                       ElevatedButton.icon(
                         onPressed: () async {
+                          // --- THEMED TIME PICKER ---
                           final TimeOfDay? picked = await showTimePicker(
                             context: context,
                             initialTime: TimeOfDay.now(),
+                            builder: (BuildContext context, Widget? child) {
+                              return Theme(
+                                data: ThemeData.dark().copyWith(
+                                  colorScheme: const ColorScheme.dark(
+                                    primary: kAccentCyan, 
+                                    onPrimary: kDarkSlate, 
+                                    surface: kCardSurface, 
+                                    onSurface: kTextWhite, 
+                                  ),
+                                  textButtonTheme: TextButtonThemeData(
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: kAccentCyan,
+                                    ),
+                                  ),
+                                ),
+                                child: child!,
+                              );
+                            },
                           );
+                          // -------------------------
+                          
                           if (picked != null) {
                             final customId = 'custom_${customReminders.length}';
                             final timeString = picked.format(context);
@@ -424,9 +455,14 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                             setState(() {});
                           }
                         },
-                        style: ElevatedButton.styleFrom(backgroundColor: kAccentBlue, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                        icon: const Icon(Icons.add, color: Colors.white),
-                        label: const Text('Add Custom Reminder', style: TextStyle(color: Colors.white)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kAccentCyan, 
+                          foregroundColor: kDarkSlate,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        ),
+                        icon: const Icon(Icons.add_alarm_rounded),
+                        label: const Text('Add Time', style: TextStyle(fontWeight: FontWeight.bold)),
                       ),
                     ],
                   ),
@@ -481,7 +517,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                           return Container(
                             margin: const EdgeInsets.symmetric(vertical: 4),
                             decoration: BoxDecoration(
-                              color: kCardSurface.withOpacity(0.6), // Matched card surface
+                              color: kCardSurface.withOpacity(0.6),
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(color: kGlassBorder),
                             ),
@@ -515,16 +551,16 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
     setState(() {
       currentWater = 0;
     });
+    // 4. TRIGGER CALLBACK ON RESET
+    widget.onWaterChanged?.call(currentWater);
     _updateWaterIntake();
   }
 
-  // --- UI BUILD METHOD ---
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     final isSmallScreen = size.width < 360;
 
-    // EXACT BACKGROUND FROM HOME/NUTRITION PAGE
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -538,7 +574,6 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
-          // --- CHANGE: REMOVED LEADING ICON & DISABLED DEFAULT ---
           automaticallyImplyLeading: false,
           title: const Text("Hydration", style: TextStyle(color: kTextWhite, fontWeight: FontWeight.bold, fontSize: 24)),
           centerTitle: true,
@@ -564,7 +599,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                       _buildQuickAddSection(size, isSmallScreen),
                       SizedBox(height: size.height * 0.03),
                       _buildReminderSection(isSmallScreen),
-                      SizedBox(height: size.height * 0.15), // Bottom padding
+                      SizedBox(height: size.height * 0.15),
                     ],
                   ),
                 ),
@@ -572,8 +607,6 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
       ),
     );
   }
-
-  // --- WIDGETS ---
 
   Widget _buildWaterProgress(Size size, bool isSmallScreen) {
     double progress = (targetWater == 0) ? 0 : (currentWater / targetWater).clamp(0.0, 1.0);
@@ -585,32 +618,25 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
       alignment: Alignment.center,
       clipBehavior: Clip.none,
       children: [
-        // Outer Glow
         Container(
           width: circleSize + 20,
           height: circleSize + 20,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             boxShadow: [
-              BoxShadow(
-                color: kAccentBlue.withOpacity(0.2),
-                blurRadius: 30,
-                spreadRadius: 5,
-              ),
+              BoxShadow(color: kAccentBlue.withOpacity(0.2), blurRadius: 30, spreadRadius: 5),
             ],
           ),
         ),
-        // Main Glassy Circle
         Container(
           width: circleSize,
           height: circleSize,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: Colors.white.withOpacity(0.05), // Glassy white
+            color: Colors.white.withOpacity(0.05),
             border: Border.all(color: kGlassBorder, width: 2),
           ),
         ),
-        // Water Fill (Animated)
         ClipOval(
           child: SizedBox(
             width: circleSize,
@@ -629,10 +655,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        colors: [
-                          kAccentBlue.withOpacity(0.8),
-                          kAccentCyan.withOpacity(0.8),
-                        ],
+                        colors: [kAccentBlue.withOpacity(0.8), kAccentCyan.withOpacity(0.8)],
                       ),
                     ),
                   ),
@@ -641,41 +664,19 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
             ),
           ),
         ),
-        // Text Content
         Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              '${currentWater}ml',
-              style: TextStyle(
-                color: kTextWhite,
-                fontSize: isSmallScreen ? 36 : 46,
-                fontWeight: FontWeight.bold,
-                shadows: [Shadow(color: Colors.black.withOpacity(0.5), blurRadius: 10)],
-              ),
-            ),
-            Text(
-              'of ${targetWater}ml goal',
-              style: TextStyle(
-                color: kTextWhite.withOpacity(0.7),
-                fontSize: isSmallScreen ? 14 : 16,
-              ),
-            ),
+            Text('${currentWater}ml', style: TextStyle(color: kTextWhite, fontSize: isSmallScreen ? 36 : 46, fontWeight: FontWeight.bold, shadows: [Shadow(color: Colors.black.withOpacity(0.5), blurRadius: 10)])),
+            Text('of ${targetWater}ml goal', style: TextStyle(color: kTextWhite.withOpacity(0.7), fontSize: isSmallScreen ? 14 : 16)),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.3),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                '${(progress * 100).toInt()}%',
-                style: const TextStyle(color: kTextWhite, fontWeight: FontWeight.bold, fontSize: 14),
-              ),
+              decoration: BoxDecoration(color: Colors.black.withOpacity(0.3), borderRadius: BorderRadius.circular(20)),
+              child: Text('${(progress * 100).toInt()}%', style: const TextStyle(color: kTextWhite, fontWeight: FontWeight.bold, fontSize: 14)),
             ),
           ],
         ),
-        // Set Target Edit Button
         Positioned(
           right: 0,
           bottom: circleSize * 0.1,
@@ -693,10 +694,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                 children: [
                   Icon(Icons.edit, color: kDarkSlate, size: isSmallScreen ? 14 : 16),
                   const SizedBox(width: 4),
-                  Text(
-                    'Goal',
-                    style: TextStyle(color: kDarkSlate, fontSize: isSmallScreen ? 11 : 12, fontWeight: FontWeight.bold),
-                  ),
+                  Text('Goal', style: TextStyle(color: kDarkSlate, fontSize: isSmallScreen ? 11 : 12, fontWeight: FontWeight.bold)),
                 ],
               ),
             ),
@@ -708,21 +706,15 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
 
   Widget _buildQuickAddSection(Size size, bool isSmallScreen) {
     return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: size.width * 0.05,
-        vertical: size.height * 0.025,
-      ),
+      padding: EdgeInsets.symmetric(horizontal: size.width * 0.05, vertical: size.height * 0.025),
       decoration: BoxDecoration(
-        color: kCardSurface.withOpacity(0.6), // Matched solid glassy surface
+        color: kCardSurface.withOpacity(0.6),
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: kGlassBorder),
       ),
       child: Column(
         children: [
-          Text(
-            'Quick Add',
-            style: TextStyle(color: kTextWhite, fontSize: isSmallScreen ? 16 : 18, fontWeight: FontWeight.w600),
-          ),
+          Text('Quick Add', style: TextStyle(color: kTextWhite, fontSize: isSmallScreen ? 16 : 18, fontWeight: FontWeight.w600)),
           SizedBox(height: size.height * 0.02),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -739,10 +731,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                     border: Border.all(color: kAccentBlue, width: 1.5),
                   ),
                   child: Center(
-                    child: Text(
-                      '${quickAddAmount}ml',
-                      style: TextStyle(color: kTextWhite, fontSize: isSmallScreen ? 20 : 22, fontWeight: FontWeight.bold),
-                    ),
+                    child: Text('${quickAddAmount}ml', style: TextStyle(color: kTextWhite, fontSize: isSmallScreen ? 20 : 22, fontWeight: FontWeight.bold)),
                   ),
                 ),
               ),
