@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'dart:ui'; // For ImageFilter
-import 'home_page.dart';
-import 'water_reminder.dart';
-import 'personalized_exercise_screen.dart';
+import 'dart:ui'; 
 import 'services/supabase_nutrition_service.dart';
 import 'services/user_goals_service.dart';
 import 'services/groq_service.dart';
@@ -70,21 +67,13 @@ class _NutritionPageState extends State<NutritionPage> {
     return 0;
   }
 
-  int _toInt(dynamic v) {
-    if (v == null) return 0;
-    if (v is int) return v;
-    if (v is num) return v.toInt();
-    if (v is String) return int.tryParse(v.trim()) ?? 0;
-    return 0;
-  }
-
   // --- BACKEND LOGIC: LOAD DATA ---
-  Future<void> _loadTodayData() async {
-    setState(() => isLoading = true);
+  Future<void> _loadTodayData({bool silent = false}) async {
+    if (!silent) {
+      setState(() => isLoading = true);
+    }
 
     try {
-      // We wrap this in a try-catch specifically for goals so it defaults to
-      // hardcoded values if the API fails, rather than breaking the whole page.
       try {
         final goalsData = await _goalsService.getUserGoals();
         if (goalsData != null) {
@@ -102,17 +91,21 @@ class _NutritionPageState extends State<NutritionPage> {
       final totals = await _supabaseService.getTodayTotals();
       final meals = await _supabaseService.getTodayMeals();
 
-      setState(() {
-        caloriesValue = _toDouble(totals['calories']);
-        proteinValue = _toDouble(totals['protein']);
-        carbsValue = _toDouble(totals['carbs']);
-        fatValue = _toDouble(totals['fat']);
-        foodLog = meals;
-        isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          caloriesValue = _toDouble(totals['calories']);
+          proteinValue = _toDouble(totals['protein']);
+          carbsValue = _toDouble(totals['carbs']);
+          fatValue = _toDouble(totals['fat']);
+          foodLog = meals;
+          isLoading = false; 
+        });
+      }
     } catch (e) {
-      setState(() => isLoading = false);
-      _showErrorSnackBar('Failed to load data');
+      if (mounted) {
+        setState(() => isLoading = false);
+        _showErrorSnackBar('Failed to load data');
+      }
     }
   }
 
@@ -123,7 +116,6 @@ class _NutritionPageState extends State<NutritionPage> {
     setState(() => isCalculating = true);
 
     try {
-      // 1. Get Data from FatSecret
       final nutritionData = await _nutritionService.getNutritionInfo(input);
 
       if (nutritionData == null) {
@@ -132,7 +124,6 @@ class _NutritionPageState extends State<NutritionPage> {
         return;
       }
 
-      // 2. Validate Data
       bool badNum(double v) => v.isNaN || v.isInfinite || v < 0;
       final foodName = nutritionData.foodName.trim();
       final serving = nutritionData.servingSize.trim();
@@ -147,7 +138,6 @@ class _NutritionPageState extends State<NutritionPage> {
         return;
       }
 
-      // 3. Save to Supabase
       final success = await _supabaseService.logMeal(
         foodName: foodName,
         servingSize: serving.isEmpty ? '1 serving' : serving,
@@ -165,7 +155,7 @@ class _NutritionPageState extends State<NutritionPage> {
       }
 
       _searchController.clear();
-      await _loadTodayData();
+      await _loadTodayData(silent: true);
 
       setState(() => isCalculating = false);
     } catch (e) {
@@ -174,7 +164,7 @@ class _NutritionPageState extends State<NutritionPage> {
     }
   }
 
-  // --- GLOSSY DIALOG: SET LIMITS ---
+  // --- GLOSSY DIALOG ---
   void _showSetLimitsDialog() {
     final calController =
         TextEditingController(text: caloriesLimit.toInt().toString());
@@ -195,13 +185,8 @@ class _NutritionPageState extends State<NutritionPage> {
             borderRadius: BorderRadius.circular(25),
             side: const BorderSide(color: kGlassBorder),
           ),
-          title: const Text(
-            "Set Nutrition Goals",
-            style: TextStyle(
-              color: kTextWhite,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+          title: const Text("Set Nutrition Goals",
+              style: TextStyle(color: kTextWhite, fontWeight: FontWeight.bold)),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -223,7 +208,6 @@ class _NutritionPageState extends State<NutritionPage> {
             ),
             ElevatedButton(
               onPressed: () async {
-                // 1. Parse Input Immediately
                 final newCalories =
                     double.tryParse(calController.text) ?? caloriesLimit;
                 final newProtein =
@@ -232,8 +216,6 @@ class _NutritionPageState extends State<NutritionPage> {
                     double.tryParse(carbController.text) ?? carbsTarget;
                 final newFat = double.tryParse(fatController.text) ?? fatTarget;
 
-                // 2. UPDATE UI IMMEDIATELY (Local State)
-                // We do not wait for the database here.
                 setState(() {
                   caloriesLimit = newCalories;
                   proteinTarget = newProtein;
@@ -241,11 +223,8 @@ class _NutritionPageState extends State<NutritionPage> {
                   fatTarget = newFat;
                 });
 
-                // 3. Close the dialog
                 if (mounted) Navigator.pop(context);
 
-                // 4. Try to save to Database in background (Fire and forget)
-                // If this fails, it won't crash the app or stop the user's progress.
                 try {
                   await _goalsService.updateUserGoals(
                     caloriesGoal: newCalories.toInt(),
@@ -254,16 +233,13 @@ class _NutritionPageState extends State<NutritionPage> {
                     fatGoal: newFat.toInt(),
                   );
                 } catch (e) {
-                  debugPrint(
-                      "Failed to persist goals to DB, but local state is updated.");
+                  debugPrint("Failed to persist goals to DB.");
                 }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: kAccentCyan,
                 foregroundColor: kDarkSlate,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
               child: const Text("Save Goals"),
             ),
@@ -282,10 +258,7 @@ class _NutritionPageState extends State<NutritionPage> {
             const Icon(Icons.error_outline_rounded,
                 color: Colors.white, size: 20),
             const SizedBox(width: 12),
-            Expanded(
-              child: Text(message,
-                  style: const TextStyle(color: Colors.white)),
-            ),
+            Expanded(child: Text(message, style: const TextStyle(color: Colors.white))),
           ],
         ),
         backgroundColor: Colors.redAccent.withOpacity(0.9),
@@ -296,7 +269,6 @@ class _NutritionPageState extends State<NutritionPage> {
     );
   }
 
-  // --- UI WIDGETS ---
   Widget _buildGoalInput(String label, TextEditingController controller) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -337,22 +309,17 @@ class _NutritionPageState extends State<NutritionPage> {
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
-          // --- NO BACK BUTTON ---
           automaticallyImplyLeading: false,
           title: const Text(
             "Nutrition",
-            style: TextStyle(
-              color: kTextWhite,
-              fontWeight: FontWeight.bold,
-              fontSize: 24,
-            ),
+            style: TextStyle(color: kTextWhite, fontWeight: FontWeight.bold, fontSize: 24),
           ),
           centerTitle: true,
         ),
         body: isLoading
             ? const Center(child: CircularProgressIndicator(color: kAccentCyan))
             : RefreshIndicator(
-                onRefresh: _loadTodayData,
+                onRefresh: () => _loadTodayData(),
                 color: kAccentCyan,
                 child: GestureDetector(
                   onTap: () => FocusScope.of(context).unfocus(),
@@ -362,7 +329,6 @@ class _NutritionPageState extends State<NutritionPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // --- SUMMARY CARD ---
                         GlossySummaryCard(
                           consumed: caloriesValue.toInt(),
                           goal: caloriesLimit.toInt(),
@@ -375,19 +341,11 @@ class _NutritionPageState extends State<NutritionPage> {
                           onEdit: _showSetLimitsDialog,
                         ),
                         const SizedBox(height: 30),
-
-                        // --- FOOD LOG TITLE ---
                         const Text(
                           "Food Log",
-                          style: TextStyle(
-                            color: kTextWhite,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: TextStyle(color: kTextWhite, fontSize: 18, fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 15),
-
-                        // --- SEARCH BAR ---
                         Container(
                           decoration: BoxDecoration(
                             color: Colors.white.withOpacity(0.05),
@@ -400,39 +358,31 @@ class _NutritionPageState extends State<NutritionPage> {
                             textInputAction: TextInputAction.search,
                             onSubmitted: (value) => _addMeal(value),
                             decoration: InputDecoration(
-                              hintText:
-                                  "Enter food and amount (e.g. '1 apple')",
-                              hintStyle:
-                                  TextStyle(color: kTextGrey.withOpacity(0.6)),
+                              hintText: "Enter food and amount (e.g. '1 apple')",
+                              hintStyle: TextStyle(
+                                color: kTextGrey.withOpacity(0.6), 
+                                fontSize: 13
+                              ),
                               prefixIcon: isCalculating
                                   ? const Padding(
                                       padding: EdgeInsets.all(12),
                                       child: SizedBox(
                                         width: 20,
                                         height: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: kAccentCyan,
-                                        ),
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: kAccentCyan),
                                       ),
                                     )
-                                  : const Icon(Icons.auto_awesome_rounded,
-                                      color: kAccentCyan),
+                                  : const Icon(Icons.auto_awesome_rounded, color: kAccentCyan),
                               border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 20, vertical: 15),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
                             ),
                           ),
                         ),
                         const SizedBox(height: 20),
-
-                        // --- MEAL LIST ---
                         if (foodLog.isEmpty)
                           _buildEmptyState()
                         else
-                          ...foodLog
-                              .map((meal) => GlossyMealTile(meal: meal))
-                              .toList(),
+                          ...foodLog.map((meal) => GlossyMealTile(meal: meal)).toList(),
                       ],
                     ),
                   ),
@@ -453,8 +403,7 @@ class _NutritionPageState extends State<NutritionPage> {
       ),
       child: Column(
         children: [
-          Icon(Icons.no_meals_rounded,
-              size: 40, color: kTextGrey.withOpacity(0.5)),
+          Icon(Icons.no_meals_rounded, size: 40, color: kTextGrey.withOpacity(0.5)),
           const SizedBox(height: 10),
           Text(
             "No meals logged today",
@@ -494,20 +443,13 @@ class GlossySummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final progress = goal > 0 ? (consumed / goal).clamp(0.0, 1.0) : 0.0;
-
-    // ---- FIX ONLY: circle fill seam at 100% (no UI change, just rendering) ----
-    final double ringValue =
-        progress >= 1.0 ? 1.0 : (progress + 0.01).clamp(0.0, 1.0);
-    final StrokeCap ringCap =
-        progress >= 1.0 ? StrokeCap.butt : StrokeCap.round;
-    // ------------------------------------------------------------------------
+    final double progress = goal > 0 ? (consumed / goal).clamp(0.0, 1.0) : 0.0;
+    final int remaining = goal - consumed;
 
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(32),
-        // Smooth Solid Surface Color
         color: kCardSurface.withOpacity(0.6),
         border: Border.all(color: kGlassBorder),
         boxShadow: [
@@ -520,88 +462,141 @@ class GlossySummaryCard extends StatelessWidget {
       ),
       child: Column(
         children: [
+          // --- HEADER & EDIT ---
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              Row(
                 children: [
-                  Row(
-                    children: [
-                      const Text("Calories",
-                          style: TextStyle(color: kTextGrey, fontSize: 14)),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: onEdit,
-                        child: Container(
-                          padding: const EdgeInsets.all(4),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.1),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.edit_rounded,
-                              size: 12, color: kAccentCyan),
-                        ),
-                      )
-                    ],
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.orangeAccent.withOpacity(0.2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.local_fire_department_rounded,
+                        color: Colors.orangeAccent, size: 20),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    "$consumed",
-                    style: const TextStyle(
+                  const SizedBox(width: 10),
+                  const Text(
+                    "Calories",
+                    style: TextStyle(
                       color: kTextWhite,
-                      fontSize: 32,
+                      fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  Text(
-                    "/ $goal kcal",
-                    style:
-                        TextStyle(color: kTextGrey.withOpacity(0.6), fontSize: 14),
-                  ),
                 ],
               ),
-              SizedBox(
-                height: 100,
-                width: 100,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    CircularProgressIndicator(
-                      value: 1.0,
-                      strokeWidth: 8,
-                      backgroundColor: Colors.transparent,
-                      color: Colors.white.withOpacity(0.05),
-                    ),
-                    ShaderMask(
-                      shaderCallback: (bounds) => const LinearGradient(
-                        colors: [kAccentCyan, kAccentBlue],
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                      ).createShader(bounds),
-                      child: CircularProgressIndicator(
-                        value: ringValue, // FIX
-                        strokeWidth: 8,
-                        color: Colors.white,
-                        strokeCap: ringCap, // FIX
-                      ),
-                    ),
-                    Text(
-                      "${(progress * 100).toInt()}%",
-                      style: const TextStyle(
-                        color: kTextWhite,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    )
-                  ],
-                ),
-              )
+              IconButton(
+                onPressed: onEdit,
+                icon: const Icon(Icons.edit_rounded, color: kTextGrey, size: 20),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
             ],
           ),
           const SizedBox(height: 24),
+
+          // --- MAIN STATS (Linear Style) ---
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                remaining >= 0 ? "$remaining" : "0",
+                style: const TextStyle(
+                  fontSize: 48,
+                  fontWeight: FontWeight.bold,
+                  color: kTextWhite,
+                  height: 1.0,
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8.0),
+                child: Text(
+                  "kcal left",
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: kTextGrey,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // --- LINEAR PROGRESS BAR ---
+          Stack(
+            children: [
+              Container(
+                height: 24,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  return Container(
+                    height: 24,
+                    width: constraints.maxWidth * progress,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [kAccentCyan, kAccentBlue],
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: kAccentCyan.withOpacity(0.4),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+              Positioned.fill(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        "${(progress * 100).toInt()}%",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                          shadows: [Shadow(color: Colors.black45, blurRadius: 2)],
+                        ),
+                      ),
+                      Text(
+                        "$consumed / $goal",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          shadows: [Shadow(color: Colors.black45, blurRadius: 2)],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 24),
           const Divider(color: kGlassBorder),
           const SizedBox(height: 16),
+          
+          // --- MACROS (Horizontal Rows) ---
           _buildMacroRow("Protein", protein, proteinGoal, kAccentCyan),
           const SizedBox(height: 12),
           _buildMacroRow("Carbs", carbs, carbsGoal, Colors.purpleAccent),
@@ -616,12 +611,14 @@ class GlossySummaryCard extends StatelessWidget {
     final progress = goal > 0 ? (value / goal).clamp(0.0, 1.0) : 0.0;
     return Row(
       children: [
-        SizedBox(
-          width: 60,
-          child: Text(label,
-              style: const TextStyle(color: kTextGrey, fontSize: 13)),
-        ),
+        // Responsive Text
         Expanded(
+          flex: 2,
+          child: Text(label, style: const TextStyle(color: kTextGrey, fontSize: 13)),
+        ),
+        // Bar
+        Expanded(
+          flex: 5,
           child: Stack(
             children: [
               Container(
@@ -652,8 +649,9 @@ class GlossySummaryCard extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 12),
-        SizedBox(
-          width: 70,
+        // Responsive Value
+        Expanded(
+          flex: 3,
           child: Text(
             "$value / ${goal}g",
             textAlign: TextAlign.end,
@@ -692,9 +690,7 @@ class GlossyMealTile extends StatelessWidget {
     } else if (name.contains('snack')) {
       icon = Icons.cookie_rounded;
       iconColor = Colors.pinkAccent;
-    }
-    // Add specific checks for common food items to make icons more relevant
-    else if (name.contains('egg') || name.contains('chicken') || name.contains('beef')) {
+    } else if (name.contains('egg') || name.contains('chicken') || name.contains('beef')) {
       icon = Icons.restaurant_menu_rounded;
     } else if (name.contains('water') || name.contains('drink')) {
       icon = Icons.local_drink_rounded;
@@ -747,12 +743,9 @@ class GlossyMealTile extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text("P: ${meal['protein_g']}g",
-                  style: TextStyle(color: kTextGrey, fontSize: 11)),
-              Text("C: ${meal['carbs_g']}g",
-                  style: TextStyle(color: kTextGrey, fontSize: 11)),
-              Text("F: ${meal['fat_g']}g",
-                  style: TextStyle(color: kTextGrey, fontSize: 11)),
+              Text("P: ${meal['protein_g']}g", style: TextStyle(color: kTextGrey, fontSize: 11)),
+              Text("C: ${meal['carbs_g']}g", style: TextStyle(color: kTextGrey, fontSize: 11)),
+              Text("F: ${meal['fat_g']}g", style: TextStyle(color: kTextGrey, fontSize: 11)),
             ],
           )
         ],

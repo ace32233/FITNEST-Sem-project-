@@ -3,7 +3,8 @@ import 'package:flutter/services.dart';
 import 'dart:ui';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:pedometer/pedometer.dart';
+import 'package:pedometer/pedometer.dart'; // REQUIRED
+import 'package:permission_handler/permission_handler.dart'; // REQUIRED
 import 'dart:async';
 
 // --- IMPORT YOUR OTHER PAGES HERE ---
@@ -12,6 +13,7 @@ import 'calorie_page.dart';
 import 'water_reminder.dart'; 
 import 'personalized_exercise_screen.dart'; 
 import 'services/user_goals_service.dart';
+import 'profile_page.dart'; 
 
 // --- GLOSSY DESIGN CONSTANTS ---
 const Color kDarkTeal = Color(0xFF132F38); 
@@ -44,14 +46,15 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    // --- FIX: Define pages here so we can pass 'isVisible' status ---
-    // We pass 'true' to HomeDashboard only if _selectedIndex == 0
     final List<Widget> pages = [
-      HomeDashboard(isVisible: _selectedIndex == 0), // 0: Home
-      const NutritionPage(),                         // 1: Food
-      const PersonalizedExerciseScreen(),            // 2: Workout
-      const WaterTrackerPage(),                      // 3: Water
-      const Scaffold(backgroundColor: Colors.transparent, body: Center(child: Text("Stats Coming Soon", style: TextStyle(color: Colors.white)))), // 4: Stats
+      HomeDashboard(
+        isVisible: _selectedIndex == 0, 
+        onNavigate: _onItemTapped, 
+      ), 
+      const NutritionPage(),              
+      const PersonalizedExerciseScreen(), 
+      const WaterTrackerPage(),           
+      const ProfilePage(),                
     ];
 
     return Container(
@@ -64,13 +67,10 @@ class _HomePageState extends State<HomePage> {
       ),
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        
         body: IndexedStack(
           index: _selectedIndex,
           children: pages,
         ),
-
-        // --- GLOBAL NAVIGATION BAR ---
         bottomNavigationBar: SafeArea(
           child: Container(
             height: 75,
@@ -98,7 +98,7 @@ class _HomePageState extends State<HomePage> {
                     _buildNavItem(1, Icons.restaurant_menu_rounded, "Food"),
                     _buildNavItem(2, Icons.fitness_center_rounded, "Workout"),
                     _buildNavItem(3, Icons.water_drop_rounded, "Water"),
-                    _buildNavItem(4, Icons.bar_chart_rounded, "Stats"),
+                    _buildNavItem(4, Icons.person_rounded, "Profile"),
                   ],
                 ),
               ),
@@ -150,9 +150,14 @@ class _HomePageState extends State<HomePage> {
 // 2. THE HOME DASHBOARD
 // ==========================================
 class HomeDashboard extends StatefulWidget {
-  // --- FIX: Add isVisible parameter ---
   final bool isVisible;
-  const HomeDashboard({super.key, required this.isVisible});
+  final Function(int) onNavigate;
+
+  const HomeDashboard({
+    super.key, 
+    required this.isVisible, 
+    required this.onNavigate
+  });
 
   @override
   State<HomeDashboard> createState() => _HomeDashboardState();
@@ -164,7 +169,7 @@ class _HomeDashboardState extends State<HomeDashboard> {
 
   // Data variables
   int _currentStreak = 0;
-  int _steps = 0;
+  int _steps = 0; // Displayed Steps
   int _caloriesConsumed = 0;
   int _caloriesGoal = 2500;
   int _proteinConsumed = 0;
@@ -176,24 +181,20 @@ class _HomeDashboardState extends State<HomeDashboard> {
   int _waterIntake = 0;
   int _waterGoal = 3000;
 
-  // Step counter
+  // Step counter Logic
   late StreamSubscription<StepCount> _stepCountSubscription;
-  int _initialSteps = 0;
-  bool _isStepCounterInitialized = false;
+  String _status = '?';
 
   @override
   void initState() {
     super.initState();
     _loadData();
-    _initStepCounter();
+    _initPedometer();
   }
 
-  // --- FIX: ADD THIS METHOD ---
-  // This detects when the Home Page becomes visible again (e.g., coming back from Nutrition Page)
   @override
   void didUpdateWidget(HomeDashboard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // If the page just became visible, reload the data
     if (widget.isVisible && !oldWidget.isVisible) {
       _loadData();
     }
@@ -207,66 +208,60 @@ class _HomeDashboardState extends State<HomeDashboard> {
     super.dispose();
   }
 
-  void _showErrorSnackBar(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.error_outline_rounded, color: Colors.white, size: 20),
-            const SizedBox(width: 12),
-            Expanded(child: Text(message, style: const TextStyle(color: Colors.white))),
-          ],
-        ),
-        backgroundColor: Colors.redAccent.withOpacity(0.9),
-        behavior: SnackBarBehavior.floating, 
-        margin: const EdgeInsets.only(bottom: 120, left: 20, right: 20),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      ),
+  // --- PEDOMETER LOGIC ---
+  Future<void> _initPedometer() async {
+    // 1. Request Permission
+    final status = await Permission.activityRecognition.request();
+    if (status.isDenied || status.isPermanentlyDenied) {
+      setState(() => _status = 'Permission Denied');
+      return;
+    }
+
+    // 2. Start Stream
+    _stepCountSubscription = Pedometer.stepCountStream.listen(
+      _onStepCount,
+      onError: _onStepCountError,
     );
   }
 
-  Future<void> _initStepCounter() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final today = DateTime.now().toIso8601String().split('T')[0];
-      final savedDate = prefs.getString('step_date') ?? '';
-
-      if (savedDate != today) {
-        await prefs.setString('step_date', today);
-        await prefs.setInt('initial_steps', 0);
-        _initialSteps = 0;
-        _isStepCounterInitialized = false;
-      } else {
-        _initialSteps = prefs.getInt('initial_steps') ?? 0;
-      }
-
-      _stepCountSubscription = Pedometer.stepCountStream.listen(
-        _onStepCount,
-        onError: _onStepCountError,
-      );
-    } catch (e) {
-      debugPrint('Error initializing step counter: $e');
-    }
-  }
-
   void _onStepCount(StepCount event) async {
-    if (!_isStepCounterInitialized) {
-      final prefs = await SharedPreferences.getInstance();
-      _initialSteps = event.steps;
-      await prefs.setInt('initial_steps', _initialSteps);
-      _isStepCounterInitialized = true;
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Get today's date key (yyyy-mm-dd)
+    final now = DateTime.now();
+    final todayKey = "${now.year}-${now.month}-${now.day}";
+    
+    // Get saved "baseline" steps (steps at start of day)
+    int? savedStepsAtMidnight = prefs.getInt('steps_at_midnight_$todayKey');
+    
+    // If no baseline for today exists, save current phone steps as baseline
+    if (savedStepsAtMidnight == null) {
+      savedStepsAtMidnight = event.steps;
+      await prefs.setInt('steps_at_midnight_$todayKey', event.steps);
     }
-    if (!mounted) return;
-    setState(() {
-      _steps = event.steps - _initialSteps;
-    });
+
+    // Calculate actual steps today = (Total Phone Steps - Baseline)
+    int stepsToday = event.steps - savedStepsAtMidnight;
+    
+    // Handle phone reboot (Total steps might reset to 0, becoming less than baseline)
+    if (stepsToday < 0) {
+      stepsToday = event.steps; // Assume 0 baseline if rebooted
+      await prefs.setInt('steps_at_midnight_$todayKey', 0);
+    }
+
+    if (mounted) {
+      setState(() {
+        _steps = stepsToday;
+        _status = 'Active';
+      });
+    }
   }
 
   void _onStepCountError(error) {
     debugPrint('Step Count Error: $error');
+    if (mounted) setState(() => _status = 'Sensor Error');
   }
+  // -----------------------
 
   Future<void> _loadData() async {
     try {
@@ -283,24 +278,47 @@ class _HomeDashboardState extends State<HomeDashboard> {
         });
       }
 
-      final streakData = await _supabase
+      final streakRes = await _supabase
           .from('user_streaks')
           .select()
           .eq('user_id', userId)
           .maybeSingle();
+      
+      int serverStreak = streakRes != null ? (streakRes['current_streak'] ?? 0) : 0;
 
-      if (streakData != null && mounted) {
+      final lastWorkoutRes = await _supabase
+          .from('workout_logs')
+          .select('activity_date')
+          .eq('user_id', userId)
+          .order('activity_date', ascending: false)
+          .limit(1)
+          .maybeSingle();
+
+      if (lastWorkoutRes != null) {
+        final lastDateStr = lastWorkoutRes['activity_date'] as String;
+        final lastDate = DateTime.parse(lastDateStr);
+        final now = DateTime.now();
+        final today = DateTime(now.year, now.month, now.day);
+        final last = DateTime(lastDate.year, lastDate.month, lastDate.day);
+        
+        final diff = today.difference(last).inDays;
+        if (diff > 1) serverStreak = 0;
+      } else {
+        serverStreak = 0;
+      }
+
+      if (mounted) {
         setState(() {
-          _currentStreak = streakData['current_streak'] ?? 0;
+          _currentStreak = serverStreak;
         });
       }
 
-      final today = DateTime.now().toIso8601String().split('T')[0];
+      final todayStr = DateTime.now().toIso8601String().split('T')[0];
       final activityData = await _supabase
           .from('daily_activities')
           .select()
           .eq('user_id', userId)
-          .eq('activity_date', today)
+          .eq('activity_date', todayStr)
           .maybeSingle();
 
       if (activityData != null && mounted) {
@@ -314,7 +332,7 @@ class _HomeDashboardState extends State<HomeDashboard> {
           .from('meal_logs')
           .select('calories, protein_g, carbs_g, fat_g')
           .eq('user_id', userId)
-          .gte('activity_date', today)
+          .gte('activity_date', todayStr)
           .lt('activity_date', DateTime.now().add(const Duration(days: 1)).toIso8601String().split('T')[0]);
 
       if (nutritionTotals.isNotEmpty && mounted) {
@@ -395,7 +413,7 @@ class _HomeDashboardState extends State<HomeDashboard> {
         );
       }
     } catch (e) {
-      _showErrorSnackBar('Error signing out: $e');
+      debugPrint('Error signing out: $e');
     }
   }
 
@@ -469,13 +487,13 @@ class _HomeDashboardState extends State<HomeDashboard> {
                 fatGoal: _fatGoal,
                 carbs: _carbsConsumed,
                 carbsGoal: _carbsGoal,
-                onTap: () {}, 
+                onTap: () => widget.onNavigate(1), 
               ),
               const SizedBox(height: 20),
               GlossyWaterCard(
                 consumed: _waterIntake,
                 goal: _waterGoal,
-                onTap: () {},
+                onTap: () => widget.onNavigate(3), 
               ),
               const SizedBox(height: 20),
               GlossyStepsCard(steps: _steps),
@@ -490,6 +508,8 @@ class _HomeDashboardState extends State<HomeDashboard> {
 
 // --- WIDGETS ---
 
+// (Keep GlossyCalorieCard, GlossyWaterCard, GlossyStepsCard the same as defined in previous messages or this context)
+// Re-adding GlossyCalorieCard just in case it was missed in this context window
 class GlossyCalorieCard extends StatelessWidget {
   final int consumed;
   final int goal;
@@ -516,95 +536,223 @@ class GlossyCalorieCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final progress = (goal > 0) ? (consumed / goal).clamp(0.0, 1.0) : 0.0;
-    final remaining = goal - consumed;
+    final double progress = goal > 0 ? (consumed / goal).clamp(0.0, 1.0) : 0.0;
+    final int remaining = goal - consumed;
 
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: kCardSurface.withOpacity(0.6), 
+          color: kCardSurface.withOpacity(0.6),
           borderRadius: BorderRadius.circular(32),
           border: Border.all(color: kGlassBorder),
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 25, offset: const Offset(0, 10)),
+            BoxShadow(
+              color: Colors.black.withOpacity(0.25),
+              blurRadius: 25,
+              offset: const Offset(0, 10),
+            ),
           ],
         ),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Stack(
-              alignment: Alignment.center,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Container(
-                  height: 180,
-                  width: 180,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(color: kAccentCyan.withOpacity(0.15), blurRadius: 50, spreadRadius: -10),
-                    ],
-                  ),
-                ),
-                SizedBox(
-                  height: 190,
-                  width: 190,
-                  child: CircularProgressIndicator(
-                    value: 1.0,
-                    strokeWidth: 18,
-                    color: Colors.white.withOpacity(0.05),
-                    strokeCap: StrokeCap.round,
-                  ),
-                ),
-                SizedBox(
-                  height: 190,
-                  width: 190,
-                  child: ShaderMask(
-                    shaderCallback: (rect) {
-                      return const LinearGradient(
-                        colors: [kAccentCyan, kAccentBlue],
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                      ).createShader(rect);
-                    },
-                    child: CircularProgressIndicator(
-                      value: progress,
-                      strokeWidth: 18,
-                      backgroundColor: Colors.transparent,
-                      color: Colors.white,
-                      strokeCap: StrokeCap.round,
-                    ),
-                  ),
-                ),
-                Column(
+                Row(
                   children: [
-                    Text(
-                      remaining >= 0 ? "$remaining" : "Over",
-                      style: const TextStyle(fontSize: 42, fontWeight: FontWeight.bold, color: kTextWhite, height: 1.0),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.orangeAccent.withOpacity(0.2),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.local_fire_department_rounded,
+                          color: Colors.orangeAccent, size: 20),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      "Kcal Left",
-                      style: TextStyle(fontSize: 14, color: kTextGrey.withOpacity(0.8), letterSpacing: 1.2),
+                    const SizedBox(width: 10),
+                    const Text(
+                      "Calories",
+                      style: TextStyle(
+                        color: kTextWhite,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ],
                 ),
+                const Icon(Icons.arrow_forward_ios_rounded,
+                    color: kTextGrey, size: 16),
               ],
             ),
-            const SizedBox(height: 30),
+            const SizedBox(height: 24),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                GlossyMacroTile("Protein", "$protein/${proteinGoal}g", kAccentCyan),
-                Container(width: 1, height: 30, color: kGlassBorder),
-                GlossyMacroTile("Fat", "$fat/${fatGoal}g", Colors.orangeAccent),
-                Container(width: 1, height: 30, color: kGlassBorder),
-                GlossyMacroTile("Carbs", "$carbs/${carbsGoal}g", Colors.purpleAccent),
+                Text(
+                  remaining >= 0 ? "$remaining" : "0",
+                  style: const TextStyle(
+                    fontSize: 48,
+                    fontWeight: FontWeight.bold,
+                    color: kTextWhite,
+                    height: 1.0,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 8.0),
+                  child: Text(
+                    "kcal left",
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: kTextGrey,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Stack(
+              children: [
+                Container(
+                  height: 24,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    return Container(
+                      height: 24,
+                      width: constraints.maxWidth * progress,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [kAccentCyan, kAccentBlue],
+                          begin: Alignment.centerLeft,
+                          end: Alignment.centerRight,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: kAccentCyan.withOpacity(0.4),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+                Positioned.fill(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          "${(progress * 100).toInt()}%",
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                            shadows: [Shadow(color: Colors.black45, blurRadius: 2)],
+                          ),
+                        ),
+                        Text(
+                          "$consumed / $goal",
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            shadows: [Shadow(color: Colors.black45, blurRadius: 2)],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            const Divider(color: kGlassBorder, height: 1),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _buildCompactMacro("Protein", protein, proteinGoal, kAccentCyan),
+                _buildCompactMacro("Carbs", carbs, carbsGoal, Colors.purpleAccent),
+                _buildCompactMacro("Fat", fat, fatGoal, Colors.orangeAccent),
               ],
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildCompactMacro(String label, int value, int goal, Color color) {
+    double progress = goal > 0 ? (value / goal).clamp(0.0, 1.0) : 0.0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(color: color.withOpacity(0.5), blurRadius: 4),
+                ],
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                color: kTextGrey,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          "$value/${goal}g",
+          style: const TextStyle(
+            color: kTextWhite,
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          height: 4,
+          width: 80,
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(2),
+          ),
+          child: FractionallySizedBox(
+            alignment: Alignment.centerLeft,
+            widthFactor: progress,
+            child: Container(
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
