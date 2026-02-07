@@ -4,6 +4,15 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'login_page.dart';
 import 'verification.dart';
 
+// --- GLOSSY DESIGN CONSTANTS ---
+const Color kDarkTeal = Color(0xFF132F38); 
+const Color kDarkSlate = Color(0xFF0F172A); 
+const Color kCardSurface = Color(0xFF1E293B); 
+const Color kGlassBorder = Color(0x33FFFFFF); 
+const Color kAccentCyan = Color(0xFF22D3EE); 
+const Color kTextWhite = Colors.white;
+const Color kTextGrey = Color(0xFF94A3B8);
+
 class SignUpPage extends StatefulWidget {
   const SignUpPage({super.key});
 
@@ -17,6 +26,8 @@ class _SignUpPageState extends State<SignUpPage> {
   final _passwordController = TextEditingController();
 
   bool _loading = false;
+  // --- New State Variable for Password Visibility ---
+  bool _isPasswordVisible = false;
 
   @override
   void dispose() {
@@ -94,8 +105,10 @@ class _SignUpPageState extends State<SignUpPage> {
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
+        content: Text(message, style: const TextStyle(color: Colors.white)),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
@@ -103,8 +116,10 @@ class _SignUpPageState extends State<SignUpPage> {
   void _showSuccess(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
+        content: Text(message, style: const TextStyle(color: Colors.white)),
         backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
@@ -113,185 +128,198 @@ class _SignUpPageState extends State<SignUpPage> {
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF0A2852),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: EdgeInsets.symmetric(horizontal: size.width * 0.05),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 10),
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [kDarkSlate, kDarkTeal], // Glossy Background
+        ),
+      ),
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.symmetric(horizontal: size.width * 0.08),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 10),
 
-              // Back Button
-              GestureDetector(
-                onTap: () => Navigator.pop(context),
-                child: Text(
-                  '<',
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontSize: size.width * 0.08,
-                    fontWeight: FontWeight.w700,
+                // Back Button
+                GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: const Icon(Icons.arrow_back_ios_new, color: kTextWhite, size: 24),
+                ),
+
+                const SizedBox(height: 20),
+
+                // Title
+                Center(
+                  child: Column(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: kCardSurface.withOpacity(0.5),
+                          border: Border.all(color: kGlassBorder),
+                          boxShadow: [
+                            BoxShadow(
+                              color: kAccentCyan.withOpacity(0.2),
+                              blurRadius: 20,
+                              spreadRadius: 2,
+                            ),
+                          ],
+                        ),
+                        child: const Icon(Icons.person_add_alt_1_rounded, size: 40, color: kAccentCyan),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        "Create Account",
+                        style: GoogleFonts.poppins(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: kTextWhite,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        "Join us to start your journey",
+                        style: TextStyle(color: kTextGrey.withOpacity(0.8), fontSize: 16),
+                      ),
+                    ],
                   ),
                 ),
-              ),
 
-              const SizedBox(height: 10),
+                SizedBox(height: size.height * 0.05),
 
-              // Title
-              Center(
-                child: Text(
-                  "Create Account",
-                  style: GoogleFonts.pacifico(
-                    fontSize: size.width * 0.115,
-                    letterSpacing: 2.5,
-                    color: Colors.white,
-                  ),
+                // Inputs
+                _buildGlossyTextField(
+                  controller: _nameController,
+                  label: "Full Name",
+                  icon: Icons.person_outline,
                 ),
-              ),
+                const SizedBox(height: 16),
+                _buildGlossyTextField(
+                  controller: _emailController,
+                  label: "Email",
+                  icon: Icons.email_outlined,
+                ),
+                const SizedBox(height: 16),
+                _buildGlossyTextField(
+                  controller: _passwordController,
+                  label: "Password",
+                  icon: Icons.lock_outline,
+                  isPassword: true,
+                ),
 
-              SizedBox(height: size.height * 0.08),
+                SizedBox(height: size.height * 0.05),
 
-              _buildField("Full Name", _nameController, "Enter Full Name"),
-              SizedBox(height: size.height * 0.025),
-
-              _buildField("Email", _emailController, "Enter Email"),
-              SizedBox(height: size.height * 0.025),
-
-              _buildField(
-                "Password",
-                _passwordController,
-                "Enter Password (min 6 characters)",
-                obscure: true,
-              ),
-
-              SizedBox(height: size.height * 0.18),
-
-              // Create Button
-              Center(
-                child: SizedBox(
-                  width: size.width * 0.4,
-                  height: size.height * 0.05,
+                // Create Button
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
                   child: ElevatedButton(
                     onPressed: _loading ? null : _signUp,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      disabledBackgroundColor: Colors.white70,
-                      foregroundColor: const Color(0xFF0D2847),
+                      backgroundColor: kAccentCyan,
+                      foregroundColor: kDarkSlate,
+                      elevation: 0,
                       shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(size.height * 0.0325),
+                        borderRadius: BorderRadius.circular(16),
                       ),
                     ),
                     child: _loading
                         ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(Color(0xFF0D2847)),
-                            ),
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2.5, color: kDarkSlate),
                           )
-                        : Text(
-                            "Create",
-                            style: _textStyle(
-                              16,
-                              const Color(0xFF0D2847),
-                              FontWeight.w800,
-                              1.5,
-                            ),
+                        : const Text(
+                            "Sign Up",
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                           ),
                   ),
                 ),
-              ),
 
-              SizedBox(height: size.height * 0.04),
+                const SizedBox(height: 24),
 
-              // Login Link
-              Center(
-                child: GestureDetector(
-                  onTap: () {
-                    Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(builder: (_) => const LoginPage()),
-                    );
-                  },
-                  child: Text.rich(
-                    TextSpan(
-                      text: "Already have an account? ",
-                      style: _textStyle(16, Colors.white70),
-                      children: [
-                        TextSpan(
-                          text: "Log In",
-                          style: _textStyle(
-                            16,
-                            const Color.fromARGB(255, 255, 92, 22),
-                            FontWeight.w400,
+                // Login Link
+                Center(
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(builder: (_) => const LoginPage()),
+                      );
+                    },
+                    child: RichText(
+                      text: TextSpan(
+                        text: "Already have an account? ",
+                        style: const TextStyle(color: kTextGrey),
+                        children: [
+                          TextSpan(
+                            text: "Log In",
+                            style: GoogleFonts.poppins(
+                              color: kAccentCyan,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-
-              const SizedBox(height: 30),
-            ],
+                
+                const SizedBox(height: 30),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildField(
-    String label,
-    TextEditingController controller,
-    String hint, {
-    bool obscure = false,
+  Widget _buildGlossyTextField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    bool isPassword = false,
   }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: _textStyle(16)),
-        const SizedBox(height: 6),
-        TextField(
-          controller: controller,
-          obscureText: obscure,
-          style: _textStyle(15),
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: const Color(0xFF3C3C3C),
-            hintText: hint,
-            hintStyle: _textStyle(15, Colors.white38),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide:
-                  const BorderSide(color: Color(0xFF6C63FF), width: 2),
-            ),
-          ),
+    return Container(
+      decoration: BoxDecoration(
+        color: kCardSurface.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: kGlassBorder),
+      ),
+      child: TextField(
+        controller: controller,
+        // Logic to toggle visibility
+        obscureText: isPassword ? !_isPasswordVisible : false,
+        style: const TextStyle(color: kTextWhite),
+        decoration: InputDecoration(
+          prefixIcon: Icon(icon, color: kTextGrey),
+          labelText: label,
+          labelStyle: const TextStyle(color: kTextGrey),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          // Suffix Icon Logic
+          suffixIcon: isPassword
+              ? IconButton(
+                  icon: Icon(
+                    _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
+                    color: kTextGrey,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _isPasswordVisible = !_isPasswordVisible;
+                    });
+                  },
+                )
+              : null,
         ),
-      ],
-    );
-  }
-
-  TextStyle _textStyle(
-    double size, [
-    Color? color,
-    FontWeight? weight,
-    double? letterSpacing,
-  ]) {
-    return GoogleFonts.poppins(
-      color: color ?? Colors.white,
-      fontSize: size,
-      fontWeight: weight,
-      letterSpacing: letterSpacing,
+      ),
     );
   }
 }
