@@ -7,7 +7,6 @@ import '/services/exercise_service.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -36,6 +35,7 @@ class UserProfile {
     required this.gender,
   });
 
+  // Exact Logic from Profile Page
   double get bmi {
     if (heightCm <= 0 || weightKg <= 0) return 0;
     final hM = heightCm / 100.0;
@@ -216,6 +216,7 @@ final exercisesForGroupProvider = FutureProvider.autoDispose<List<Exercise>>((re
   return unique;
 });
 
+// History & Logic
 class WorkoutHistory {
   final String date;
   final bool completed;
@@ -840,11 +841,9 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
   }
 }
 
-// ... (Sub-widgets: _ProfileCard, _ExerciseCard, WorkoutPlayerScreen etc. kept same as before) ...
-// (I will omit repeating the visual sub-widgets to keep the response concise, 
-//  as they are unchanged from the previous correct version, only the Controller & Screen logic changed).
-// Be sure to keep _ProfileCard, _ExerciseCard, WorkoutPlayerScreen, etc. in your file.
-// The visual layout is already correct from the previous step.
+// ==========================================
+// SUB-WIDGETS (VISUALS)
+// ==========================================
 
 class _ProfileCard extends StatelessWidget {
   final int age;
@@ -1017,7 +1016,7 @@ class WorkoutPlayerScreen extends ConsumerWidget {
               ? (workout.isFinished
                   ? _CompletedView(onDone: () => Navigator.pop(context))
                   : Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisAlignment: MainAxisAlignment.center, // Centers content
                       children: [
                         _WorkoutStepView(
                           exercise: cur!,
@@ -1059,7 +1058,7 @@ class _WorkoutStepView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
-      mainAxisSize: MainAxisSize.min,
+      mainAxisSize: MainAxisSize.min, // Shrinks to fit content
       children: [
         Container(
           width: double.infinity,
@@ -1090,10 +1089,11 @@ class _WorkoutStepView extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                   child: _ExerciseGif(
                     exerciseId: exercise.id, 
-                    fit: BoxFit.cover
+                    fit: BoxFit.cover // Forces image to fill width
                   ),
                 ),
               ),
+              
               const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
@@ -1132,6 +1132,7 @@ class _WorkoutStepView extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
+        // Controls
         Row(
           children: [
             Expanded(
@@ -1225,6 +1226,8 @@ class _CompletedView extends StatelessWidget {
     );
   }
 }
+
+// --- VISUALS ---
 
 class _Pill extends StatelessWidget {
   final String text;
