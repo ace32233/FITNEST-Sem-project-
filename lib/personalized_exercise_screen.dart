@@ -841,10 +841,6 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
   }
 }
 
-// ==========================================
-// SUB-WIDGETS (VISUALS)
-// ==========================================
-
 class _ProfileCard extends StatelessWidget {
   final int age;
   final double bmi;
@@ -1016,7 +1012,7 @@ class WorkoutPlayerScreen extends ConsumerWidget {
               ? (workout.isFinished
                   ? _CompletedView(onDone: () => Navigator.pop(context))
                   : Column(
-                      mainAxisAlignment: MainAxisAlignment.center, // Centers content
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         _WorkoutStepView(
                           exercise: cur!,
@@ -1058,7 +1054,7 @@ class _WorkoutStepView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
-      mainAxisSize: MainAxisSize.min, // Shrinks to fit content
+      mainAxisSize: MainAxisSize.min,
       children: [
         Container(
           width: double.infinity,
@@ -1089,11 +1085,10 @@ class _WorkoutStepView extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                   child: _ExerciseGif(
                     exerciseId: exercise.id, 
-                    fit: BoxFit.cover // Forces image to fill width
+                    fit: BoxFit.cover
                   ),
                 ),
               ),
-              
               const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
@@ -1132,7 +1127,6 @@ class _WorkoutStepView extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        // Controls
         Row(
           children: [
             Expanded(
@@ -1331,14 +1325,43 @@ class _InfoBanner extends StatelessWidget {
   }
 }
 
-class _ExerciseGif extends StatelessWidget {
+// ✅ FIXED FLICKERING: Converted to StatefulWidget to cache Future
+class _ExerciseGif extends StatefulWidget {
   final String exerciseId;
   final BoxFit fit;
   const _ExerciseGif({required this.exerciseId, this.fit = BoxFit.cover});
 
   @override
+  State<_ExerciseGif> createState() => _ExerciseGifState();
+}
+
+class _ExerciseGifState extends State<_ExerciseGif> {
+  late Future<Uint8List> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    // Cache the future here so it doesn't recreate on rebuilds
+    _future = ExerciseService.fetchExerciseGifBytes(
+      exerciseId: widget.exerciseId,
+      resolutionPx: 180,
+    );
+  }
+
+  @override
+  void didUpdateWidget(_ExerciseGif oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.exerciseId != widget.exerciseId) {
+      _future = ExerciseService.fetchExerciseGifBytes(
+        exerciseId: widget.exerciseId,
+        resolutionPx: 180,
+      );
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (exerciseId.trim().isEmpty) {
+    if (widget.exerciseId.trim().isEmpty) {
       return Container(
         color: Colors.black12,
         alignment: Alignment.center,
@@ -1347,10 +1370,7 @@ class _ExerciseGif extends StatelessWidget {
     }
 
     return FutureBuilder<Uint8List>(
-      future: ExerciseService.fetchExerciseGifBytes(
-        exerciseId: exerciseId,
-        resolutionPx: 180,
-      ),
+      future: _future,
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
           return Container(
@@ -1378,7 +1398,7 @@ class _ExerciseGif extends StatelessWidget {
 
         return Image.memory(
           bytes,
-          fit: fit,
+          fit: widget.fit,
           filterQuality: FilterQuality.medium,
           gaplessPlayback: true,
           errorBuilder: (_, __, ___) {

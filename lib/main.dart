@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter/rendering.dart';
+import 'services/notification_service.dart';
 
 // --- PAGE IMPORTS ---
 import 'intro_page.dart';
@@ -42,6 +43,10 @@ void main() async {
     anonKey: supabaseAnonKey,
   );
 
+  // Initialize Notifications
+  WidgetsBinding.instance.addPostFrameCallback((_) async {
+    await NotificationService().initialize();
+  });
   runApp(
     const ProviderScope(
       child: MyApp(),
