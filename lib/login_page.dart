@@ -3,7 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'signup_page.dart';
-import 'intro_page.dart'; // FIX: Import IntroPage for loading logic
+import 'intro_page.dart'; 
+import 'gender_page.dart'; // Import GenderPage for onboarding
 
 // --- GLOSSY DESIGN CONSTANTS ---
 const Color kDarkTeal = Color(0xFF132F38); 
@@ -43,7 +44,7 @@ class _LoginPageState extends State<LoginPage> {
     final session = supabase.auth.currentSession;
 
     if (session != null && rememberMe && mounted) {
-      // If session exists, go to IntroPage for data loading
+      // If session exists, let IntroPage handle the data loading
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const IntroPage(isPostLogin: true)),
@@ -80,15 +81,33 @@ class _LoginPageState extends State<LoginPage> {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('remember_me', _rememberMe);
 
-        // Ensure profile exists
+        // 1. Ensure basic profile exists in 'profiles' table
         await _ensureProfileExists(response.user!);
 
-        // FIX: Navigate to IntroPage (Loading Screen) instead of direct Home/Onboarding check
-        // The IntroPage/HomePage will handle fetching data.
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const IntroPage(isPostLogin: true)),
-        );
+        // 2. Check if they have completed onboarding (fitness data)
+        final fitnessData = await supabase
+            .from('user_fitness')
+            .select()
+            .eq('id', response.user!.id)
+            .maybeSingle();
+
+        if (!mounted) return;
+
+        if (fitnessData == null) {
+          // --- CASE A: FIRST TIME USER ---
+          // No fitness data found -> Go to Onboarding (Gender Page)
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const GenderScreen()),
+          );
+        } else {
+          // --- CASE B: RETURNING USER ---
+          // Data found -> Go to Loading Screen -> Home
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const IntroPage(isPostLogin: true)),
+          );
+        }
       }
     } on AuthException catch (e) {
       _showError(e.message);

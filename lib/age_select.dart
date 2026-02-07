@@ -1,6 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'weight_select.dart';
+import 'weight_select.dart'; // Ensure this import is correct
+
+// --- GLOSSY DESIGN CONSTANTS ---
+const Color kDarkTeal = Color(0xFF132F38); 
+const Color kDarkSlate = Color(0xFF0F172A); 
+const Color kCardSurface = Color(0xFF1E293B); 
+const Color kGlassBorder = Color(0x33FFFFFF); 
+const Color kAccentCyan = Color(0xFF22D3EE); 
+const Color kTextWhite = Colors.white;
+const Color kTextGrey = Color(0xFF94A3B8);
 
 class AgeSelectionScreen extends StatefulWidget {
   final String selectedGender;
@@ -15,8 +23,6 @@ class AgeSelectionScreen extends StatefulWidget {
 }
 
 class _AgeSelectionScreenState extends State<AgeSelectionScreen> {
-  // Use ValueNotifier to isolate rebuilds to only the wheel widget
-  // instead of rebuilding the entire screen via setState.
   late final ValueNotifier<int> _selectedAgeNotifier;
   late final FixedExtentScrollController _controller;
 
@@ -26,7 +32,6 @@ class _AgeSelectionScreenState extends State<AgeSelectionScreen> {
   void initState() {
     super.initState();
     _controller = FixedExtentScrollController(initialItem: _initialItemIndex);
-    // Initialize age based on initial scroll index (index + 1)
     _selectedAgeNotifier = ValueNotifier<int>(_initialItemIndex + 1);
   }
 
@@ -51,109 +56,118 @@ class _AgeSelectionScreenState extends State<AgeSelectionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Encapsulate responsive logic in a helper class to clean up the build method
-    final layout = _Layout(MediaQuery.sizeOf(context));
+    final size = MediaQuery.sizeOf(context);
+    final layout = _Layout(size);
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF0A2852),
-      body: Stack(
-        children: [
-          // 1. Extracted to const widget to prevent repainting on scroll
-          const Positioned.fill(
-            child: _WaveBackground(),
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [kDarkSlate, kDarkTeal], // Glossy Background
+        ),
+      ),
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back_rounded, color: kTextWhite, size: layout.iconSize),
+            onPressed: () => Navigator.maybePop(context),
           ),
+        ),
+        body: SafeArea(
+          child: Column(
+            children: [
+              SizedBox(height: layout.topSpacing),
 
-          SafeArea(
-            child: Column(
-              children: [
-                SizedBox(height: layout.topSpacing),
-
-                // 2. Extracted header components
-                _Header(layout: layout),
-
-                SizedBox(height: layout.titleSpacing),
-
-                // 3. Wheel logic isolated in specific widget
-                // Only this widget rebuilds when the wheel scrolls
-                _AgePickerWheel(
-                  controller: _controller,
-                  layout: layout,
-                  ageNotifier: _selectedAgeNotifier,
+              // 1. Header
+              Text(
+                'How old are you?',
+                style: TextStyle(
+                  color: kTextWhite,
+                  fontSize: layout.titleFontSize,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.0,
                 ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'This helps us tailor your plan',
+                style: TextStyle(
+                  color: kTextGrey,
+                  fontSize: layout.subtitleFontSize,
+                ),
+              ),
 
-                SizedBox(height: layout.bottomSpacing),
+              SizedBox(height: layout.titleSpacing),
 
-                // 4. Next button remains static, reads value on press
-                Center(
-                  child: SizedBox(
-                    width: layout.buttonWidth,
-                    height: layout.buttonHeight,
-                    child: ElevatedButton(
-                      onPressed: _handleNext,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(layout.buttonRadius),
-                        ),
-                        elevation: 3,
+              // 2. Wheel Picker
+              Expanded(
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Highlight Bar (Behind the numbers)
+                    Container(
+                      height: layout.itemExtent,
+                      width: size.width * 0.5,
+                      decoration: BoxDecoration(
+                        color: kAccentCyan.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: kAccentCyan.withOpacity(0.3)),
                       ),
-                      child: Text(
-                        'Next',
-                        style: GoogleFonts.poppins(
-                          fontSize: layout.buttonFontSize,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.black,
-                          letterSpacing: 2,
-                        ),
+                    ),
+                    
+                    // The Wheel
+                    _AgePickerWheel(
+                      controller: _controller,
+                      layout: layout,
+                      ageNotifier: _selectedAgeNotifier,
+                    ),
+                  ],
+                ),
+              ),
+
+              SizedBox(height: layout.bottomSpacing),
+
+              // 3. Next Button
+              Padding(
+                padding: EdgeInsets.only(bottom: layout.bottomPadding),
+                child: SizedBox(
+                  width: layout.buttonWidth,
+                  height: layout.buttonHeight,
+                  child: ElevatedButton(
+                    onPressed: _handleNext,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: kAccentCyan,
+                      foregroundColor: kDarkSlate,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(layout.buttonRadius),
+                      ),
+                      elevation: 5,
+                      shadowColor: kAccentCyan.withOpacity(0.4),
+                    ),
+                    child: Text(
+                      'Next',
+                      style: TextStyle(
+                        fontSize: layout.buttonFontSize,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.0,
                       ),
                     ),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
 }
 
-// --- Sub-Widgets & Helpers ---
-
-class _Header extends StatelessWidget {
-  final _Layout layout;
-
-  const _Header({required this.layout});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Padding(
-          padding: EdgeInsets.only(left: layout.backButtonPadding),
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: IconButton(
-              icon: Icon(Icons.arrow_back_rounded, size: layout.iconSize),
-              color: Colors.white,
-              onPressed: () => Navigator.maybePop(context),
-            ),
-          ),
-        ),
-        SizedBox(height: layout.topSpacing),
-        Text(
-          'What is your age?',
-          style: GoogleFonts.poppins(
-            color: Colors.white,
-            fontSize: layout.titleFontSize,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 2,
-          ),
-        ),
-      ],
-    );
-  }
-}
+// --- Sub-Widgets ---
 
 class _AgePickerWheel extends StatelessWidget {
   final FixedExtentScrollController controller;
@@ -168,192 +182,75 @@ class _AgePickerWheel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: layout.wheelContainerHeight,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // Use ValueListenableBuilder to rebuild ONLY the list when age changes
-          ValueListenableBuilder<int>(
-            valueListenable: ageNotifier,
-            builder: (context, selectedAge, child) {
-              return ListWheelScrollView.useDelegate(
-                controller: controller,
-                physics: const FixedExtentScrollPhysics(),
-                itemExtent: layout.itemExtent,
-                perspective: 0.002,
-                onSelectedItemChanged: (index) {
-                  // Update the notifier instead of calling setState on the whole screen
-                  ageNotifier.value = index + 1;
-                },
-                childDelegate: ListWheelChildBuilderDelegate(
-                  childCount: 99,
-                  builder: (context, idx) {
-                    final age = idx + 1;
-                    final bool isCenter = age == selectedAge;
-                    final int diff = (age - selectedAge).abs();
+    return ValueListenableBuilder<int>(
+      valueListenable: ageNotifier,
+      builder: (context, selectedAge, child) {
+        return ListWheelScrollView.useDelegate(
+          controller: controller,
+          physics: const FixedExtentScrollPhysics(),
+          itemExtent: layout.itemExtent,
+          perspective: 0.003,
+          diameterRatio: 1.5,
+          onSelectedItemChanged: (index) {
+            ageNotifier.value = index + 1;
+          },
+          childDelegate: ListWheelChildBuilderDelegate(
+            childCount: 99,
+            builder: (context, idx) {
+              final age = idx + 1;
+              final bool isCenter = age == selectedAge;
+              final double opacity = isCenter ? 1.0 : 0.4;
+              final double fontSize = isCenter ? layout.fontSelected : layout.fontNeighbor;
 
-                    // Optimized calculation logic
-                    final double fontSize = isCenter
-                        ? layout.fontSelected
-                        : (diff == 1
-                            ? layout.fontNeighbor
-                            : layout.fontFar);
-
-                    final double opacity =
-                        isCenter ? 1.0 : (diff == 1 ? 0.9 : 0.8);
-
-                    return Center(
-                      child: Text(
-                        '$age',
-                        style: GoogleFonts.poppins(
-                          fontSize: fontSize,
-                          fontWeight: isCenter ? FontWeight.w700 : FontWeight.w400,
-                          color: Colors.white.withOpacity(opacity),
-                          letterSpacing: 2.5,
-                        ),
-                      ),
-                    );
-                  },
+              return Center(
+                child: Text(
+                  '$age',
+                  style: TextStyle(
+                    fontSize: fontSize,
+                    fontWeight: isCenter ? FontWeight.bold : FontWeight.normal,
+                    color: isCenter ? kAccentCyan : kTextGrey.withOpacity(opacity),
+                  ),
                 ),
               );
             },
           ),
-          // Selection Lines (Static)
-          Positioned(
-            top: layout.lineTop1,
-            child: _SelectionLine(layout: layout),
-          ),
-          Positioned(
-            top: layout.lineTop2,
-            child: _SelectionLine(layout: layout),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
 
-class _SelectionLine extends StatelessWidget {
-  final _Layout layout;
+// --- Layout Helper ---
 
-  const _SelectionLine({required this.layout});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: layout.lineWidth,
-      height: layout.lineHeight,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(3),
-      ),
-    );
-  }
-}
-
-class _WaveBackground extends StatelessWidget {
-  const _WaveBackground();
-
-  @override
-  Widget build(BuildContext context) {
-    return const CustomPaint(
-      painter: WavePainter(),
-    );
-  }
-}
-
-// --- Logic & Math ---
-
-/// Helper class to calculate and hold responsive dimensions.
-/// Extracts magic numbers from the build method.
 class _Layout {
   final double topSpacing;
-  final double backButtonPadding;
   final double iconSize;
   final double titleFontSize;
+  final double subtitleFontSize;
   final double titleSpacing;
-  final double wheelContainerHeight;
   final double itemExtent;
   final double fontSelected;
   final double fontNeighbor;
-  final double fontFar;
-  final double lineWidth;
-  final double lineHeight;
-  final double lineTop1;
-  final double lineTop2;
   final double bottomSpacing;
+  final double bottomPadding;
   final double buttonWidth;
   final double buttonHeight;
   final double buttonRadius;
   final double buttonFontSize;
 
   _Layout(Size size)
-      : topSpacing = size.height * 0.00786,
-        backButtonPadding = size.width * 0.03406,
-        iconSize = size.width * 0.11528,
-        titleFontSize = size.width * 0.06288,
-        titleSpacing = size.height * 0.14148,
-        wheelContainerHeight = size.height * 0.34846,
-        itemExtent = size.height * 0.08646,
-        fontSelected = size.width * 0.09694,
-        fontNeighbor = size.width * 0.08122,
-        fontFar = size.width * 0.06812,
-        lineWidth = size.width * 0.24366,
-        lineHeight = size.height * 0.00524,
-        lineTop1 = (size.height * 0.34846 / 2) - (size.height * 0.03275),
-        lineTop2 = (size.height * 0.34846 / 2) + (size.height * 0.0262),
-        bottomSpacing = size.height * 0.17,
-        buttonWidth = size.width * 0.38776,
-        buttonHeight = size.height * 0.04978,
-        buttonRadius = size.width * 0.09694,
-        buttonFontSize = size.width * 0.0524;
-}
-
-class WavePainter extends CustomPainter {
-  const WavePainter();
-
-  // Cache the paint object to avoid recreating it every frame
-  static final Paint _paint = Paint()
-    ..color = Colors.white
-    ..style = PaintingStyle.stroke
-    ..strokeWidth = 1.5;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final path = Path();
-
-    final startY = size.height * 0.59;
-    path.moveTo(0, startY);
-
-    path.cubicTo(
-      size.width * 0.10,
-      size.height * 0.70,
-      size.width * 0.25,
-      size.height * 0.71,
-      size.width * 0.35,
-      size.height * 0.695,
-    );
-
-    path.cubicTo(
-      size.width * 0.45,
-      size.height * 0.68,
-      size.width * 0.75,
-      size.height * 0.60,
-      size.width * 0.89,
-      size.height * 0.664,
-    );
-
-    path.quadraticBezierTo(
-      size.width * 0.90,
-      size.height * 0.6662,
-      size.width,
-      size.height * 0.715,
-    );
-
-    canvas.drawPath(path, _paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+      : topSpacing = size.height * 0.02,
+        iconSize = 28,
+        titleFontSize = size.width * 0.07,
+        subtitleFontSize = size.width * 0.04,
+        titleSpacing = size.height * 0.05,
+        itemExtent = 60,
+        fontSelected = 42,
+        fontNeighbor = 28,
+        bottomSpacing = size.height * 0.05,
+        bottomPadding = size.height * 0.05,
+        buttonWidth = size.width * 0.85,
+        buttonHeight = 56,
+        buttonRadius = 16,
+        buttonFontSize = 18;
 }

@@ -1,6 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'height_select.dart';
+import 'height_select.dart'; // Ensure this import is correct
+
+// --- GLOSSY DESIGN CONSTANTS ---
+const Color kDarkTeal = Color(0xFF132F38); 
+const Color kDarkSlate = Color(0xFF0F172A); 
+const Color kCardSurface = Color(0xFF1E293B); 
+const Color kGlassBorder = Color(0x33FFFFFF); 
+const Color kAccentCyan = Color(0xFF22D3EE); 
+const Color kTextWhite = Colors.white;
+const Color kTextGrey = Color(0xFF94A3B8);
 
 class WeightSelectionScreen extends StatefulWidget {
   final String selectedGender;
@@ -17,248 +25,242 @@ class WeightSelectionScreen extends StatefulWidget {
 }
 
 class _WeightSelectionScreenState extends State<WeightSelectionScreen> {
-  final FixedExtentScrollController _controller =
-      FixedExtentScrollController(initialItem: 70);
+  late final ValueNotifier<int> _selectedWeightNotifier;
+  late final FixedExtentScrollController _controller;
 
-  int _selectedWeight = 71;
-
-  static const _bgColor = Color(0xFF0A2852);
+  static const int _initialItemIndex = 70; // Represents 71kg (0-based index)
 
   @override
   void initState() {
     super.initState();
-    _selectedWeight = _controller.initialItem + 1;
+    _controller = FixedExtentScrollController(initialItem: _initialItemIndex);
+    _selectedWeightNotifier = ValueNotifier<int>(_initialItemIndex + 1);
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _selectedWeightNotifier.dispose();
     super.dispose();
+  }
+
+  void _handleNext() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => HeightSelectionScreen(
+          selectedGender: widget.selectedGender,
+          selectedAge: widget.selectedAge,
+          selectedWeight: _selectedWeightNotifier.value,
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final width = size.width;
-    final height = size.height;
+    final size = MediaQuery.sizeOf(context);
+    final layout = _Layout(size);
 
-    return Scaffold(
-      backgroundColor: _bgColor,
-      body: Stack(
-        children: [
-          const Positioned.fill(
-            child: CustomPaint(
-              painter: WavePainter(),
-            ),
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [kDarkSlate, kDarkTeal], // Glossy Background
+        ),
+      ),
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back_rounded, color: kTextWhite, size: layout.iconSize),
+            onPressed: () => Navigator.maybePop(context),
           ),
+        ),
+        body: SafeArea(
+          child: Column(
+            children: [
+              SizedBox(height: layout.topSpacing),
 
-          SafeArea(
-            child: Column(
-              children: [
-                SizedBox(height: height * 0.005),
+              // 1. Header
+              Text(
+                'What is your weight?',
+                style: TextStyle(
+                  color: kTextWhite,
+                  fontSize: layout.titleFontSize,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.0,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'This helps us create your',
+                style: TextStyle(
+                  color: kTextGrey,
+                  fontSize: layout.subtitleFontSize,
+                ),
+              ),
+              Text(
+                'personalized plans',
+                style: TextStyle(
+                  color: kTextGrey,
+                  fontSize: layout.subtitleFontSize,
+                ),
+              ),
 
-                Padding(
-                  padding: EdgeInsets.only(left: width * 0.034),
-                  child: Align(
-                    alignment: Alignment.topLeft,
-                    child: IconButton(
-                      icon: Icon(Icons.arrow_back_rounded, size: width * 0.115),
-                      color: Colors.white,
-                      onPressed: () => Navigator.maybePop(context),
+              SizedBox(height: layout.titleSpacing),
+
+              // 2. Wheel Picker
+              Expanded(
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Highlight Bar
+                    Container(
+                      height: layout.itemExtent,
+                      width: size.width * 0.5,
+                      decoration: BoxDecoration(
+                        color: kAccentCyan.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: kAccentCyan.withOpacity(0.3)),
+                      ),
                     ),
-                  ),
+                    
+                    // The Wheel
+                    _WeightPickerWheel(
+                      controller: _controller,
+                      layout: layout,
+                      weightNotifier: _selectedWeightNotifier,
+                    ),
+                  ],
                 ),
+              ),
 
-                SizedBox(height: height * 0.008),
+              SizedBox(height: layout.bottomSpacing),
 
-                Text(
-                  'What is your weight?',
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontSize: width * 0.063,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 2,
-                  ),
-                ),
-
-                SizedBox(height: height * 0.007),
-
-                Text(
-                  'This helps us create your',
-                  style: GoogleFonts.poppins(
-                    fontSize: width * 0.037,
-                    fontWeight: FontWeight.w400,
-                    fontStyle: FontStyle.italic,
-                    color: Colors.white70,
-                    letterSpacing: 1.3,
-                  ),
-                ),
-                Text(
-                  'personalized plans',
-                  style: GoogleFonts.poppins(
-                    fontSize: width * 0.037,
-                    fontWeight: FontWeight.w400,
-                    fontStyle: FontStyle.italic,
-                    color: Colors.white70,
-                    letterSpacing: 1.3,
-                  ),
-                ),
-
-                SizedBox(height: height * 0.092),
-
-                SizedBox(
-                  height: height * 0.348,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      ListWheelScrollView.useDelegate(
-                        controller: _controller,
-                        physics: const FixedExtentScrollPhysics(),
-                        itemExtent: height * 0.086,
-                        perspective: 0.002,
-                        onSelectedItemChanged: (index) {
-                          setState(() {
-                            _selectedWeight = index + 1;
-                          });
-                        },
-                        childDelegate: ListWheelChildBuilderDelegate(
-                          childCount: 99,
-                          builder: (context, idx) {
-                            final weight = idx + 1;
-                            final bool isCenter = weight == _selectedWeight;
-                            final diff = (weight - _selectedWeight).abs();
-
-                            final double fontSize = isCenter
-                                ? width * 0.097
-                                : (diff == 1 ? width * 0.081 : width * 0.068);
-
-                            final double opacity =
-                                isCenter ? 1.0 : (diff == 1 ? 0.9 : 0.8);
-
-                            return Center(
-                              child: Text(
-                                '$weight kg',
-                                style: GoogleFonts.poppins(
-                                  fontSize: fontSize,
-                                  fontWeight: isCenter
-                                      ? FontWeight.w700
-                                      : FontWeight.w400,
-                                  color: Colors.white.withOpacity(opacity),
-                                  letterSpacing: 2.5,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-
-                      Positioned(
-                        top: height * 0.135,
-                        child: Container(
-                          width: width * 0.364,
-                          height: height * 0.005,
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                        ),
-                      ),
-
-                      Positioned(
-                        top: height * 0.210,
-                        child: Container(
-                          width: width * 0.364,
-                          height: height * 0.005,
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                SizedBox(height: height * 0.16),
-
-                SizedBox(
-                  width: width * 0.388,
-                  height: height * 0.050,
+              // 3. Next Button
+              Padding(
+                padding: EdgeInsets.only(bottom: layout.bottomPadding),
+                child: SizedBox(
+                  width: layout.buttonWidth,
+                  height: layout.buttonHeight,
                   child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => HeightSelectionScreen(
-                            selectedGender: widget.selectedGender,
-                            selectedAge: widget.selectedAge,
-                            selectedWeight: _selectedWeight,
-                          ),
-                        ),
-                      );
-                    },
+                    onPressed: _handleNext,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
+                      backgroundColor: kAccentCyan,
+                      foregroundColor: kDarkSlate,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(40),
+                        borderRadius: BorderRadius.circular(layout.buttonRadius),
                       ),
-                      elevation: 3,
+                      elevation: 5,
+                      shadowColor: kAccentCyan.withOpacity(0.4),
                     ),
                     child: Text(
                       'Next',
-                      style: GoogleFonts.poppins(
-                        fontSize: width * 0.052,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.black,
-                        letterSpacing: 2,
+                      style: TextStyle(
+                        fontSize: layout.buttonFontSize,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.0,
                       ),
                     ),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
 }
 
-class WavePainter extends CustomPainter {
-  const WavePainter();
+// --- Sub-Widgets ---
+
+class _WeightPickerWheel extends StatelessWidget {
+  final FixedExtentScrollController controller;
+  final _Layout layout;
+  final ValueNotifier<int> weightNotifier;
+
+  const _WeightPickerWheel({
+    required this.controller,
+    required this.layout,
+    required this.weightNotifier,
+  });
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: weightNotifier,
+      builder: (context, selectedWeight, child) {
+        return ListWheelScrollView.useDelegate(
+          controller: controller,
+          physics: const FixedExtentScrollPhysics(),
+          itemExtent: layout.itemExtent,
+          perspective: 0.003,
+          diameterRatio: 1.5,
+          onSelectedItemChanged: (index) {
+            weightNotifier.value = index + 1;
+          },
+          childDelegate: ListWheelChildBuilderDelegate(
+            childCount: 200, // Reasonable max weight
+            builder: (context, idx) {
+              final weight = idx + 1;
+              final bool isCenter = weight == selectedWeight;
+              final double opacity = isCenter ? 1.0 : 0.4;
+              final double fontSize = isCenter ? layout.fontSelected : layout.fontNeighbor;
 
-    final path = Path();
-
-    final startY = size.height * 0.59;
-    path.moveTo(0, startY);
-
-    path.cubicTo(
-      size.width * 0.10, size.height * 0.70,
-      size.width * 0.25, size.height * 0.71,
-      size.width * 0.35, size.height * 0.695,
+              return Center(
+                child: Text(
+                  '$weight kg',
+                  style: TextStyle(
+                    fontSize: fontSize,
+                    fontWeight: isCenter ? FontWeight.bold : FontWeight.normal,
+                    color: isCenter ? kAccentCyan : kTextGrey.withOpacity(opacity),
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
     );
-
-    path.cubicTo(
-      size.width * 0.45, size.height * 0.68,
-      size.width * 0.75, size.height * 0.60,
-      size.width * 0.89, size.height * 0.664,
-    );
-
-    path.quadraticBezierTo(
-      size.width * 0.90, size.height * 0.6662,
-      size.width, size.height * 0.715,
-    );
-
-    canvas.drawPath(path, paint);
   }
+}
 
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+// --- Layout Helper ---
+
+class _Layout {
+  final double topSpacing;
+  final double iconSize;
+  final double titleFontSize;
+  final double subtitleFontSize;
+  final double titleSpacing;
+  final double itemExtent;
+  final double fontSelected;
+  final double fontNeighbor;
+  final double bottomSpacing;
+  final double bottomPadding;
+  final double buttonWidth;
+  final double buttonHeight;
+  final double buttonRadius;
+  final double buttonFontSize;
+
+  _Layout(Size size)
+      : topSpacing = size.height * 0.02,
+        iconSize = 28,
+        titleFontSize = size.width * 0.07,
+        subtitleFontSize = size.width * 0.04,
+        titleSpacing = size.height * 0.05,
+        itemExtent = 60,
+        fontSelected = 42,
+        fontNeighbor = 28,
+        bottomSpacing = size.height * 0.05,
+        bottomPadding = size.height * 0.05,
+        buttonWidth = size.width * 0.85,
+        buttonHeight = 56,
+        buttonRadius = 16,
+        buttonFontSize = 18;
 }
