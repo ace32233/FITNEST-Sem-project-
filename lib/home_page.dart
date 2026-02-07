@@ -59,11 +59,10 @@ class DashboardData {
 // 1. THE MAIN CONTROLLER (STATE CONTAINER)
 // ==========================================
 class HomePage extends StatefulWidget {
-  final DashboardData? initialData; // Added to accept pre-loaded data
+  final DashboardData? initialData; 
 
   const HomePage({super.key, this.initialData});
 
-  // --- STATIC PRE-LOADER ---
   static Future<DashboardData> preloadData() async {
     try {
       final supabase = Supabase.instance.client;
@@ -73,21 +72,18 @@ class HomePage extends StatefulWidget {
       final today = DateTime.now().toIso8601String().split('T')[0];
       final goalsService = UserGoalsService();
 
-      // 1. Parallel Fetching for Speed
       final results = await Future.wait<dynamic>([
-        goalsService.getUserGoals(), // 0: Goals
-        supabase.from('daily_activities').select().eq('user_id', userId).eq('activity_date', today).maybeSingle() as Future<Map<String, dynamic>?>, // 1: Water
-        supabase.from('meal_logs').select().eq('user_id', userId).gte('activity_date', today).lt('activity_date', DateTime.now().add(const Duration(days: 1)).toIso8601String().split('T')[0]) as Future<List<dynamic>>, // 2: Meals
-        supabase.from('user_streaks').select().eq('user_id', userId).maybeSingle() as Future<Map<String, dynamic>?>, // 3: Streak
+        goalsService.getUserGoals(), 
+        supabase.from('daily_activities').select().eq('user_id', userId).eq('activity_date', today).maybeSingle() as Future<Map<String, dynamic>?>, 
+        supabase.from('meal_logs').select().eq('user_id', userId).gte('activity_date', today).lt('activity_date', DateTime.now().add(const Duration(days: 1)).toIso8601String().split('T')[0]) as Future<List<dynamic>>, 
+        supabase.from('user_streaks').select().eq('user_id', userId).maybeSingle() as Future<Map<String, dynamic>?>, 
       ]);
 
-      // 2. Parse Results
       final goals = results[0] as Map<String, dynamic>?;
       final activity = results[1] as Map<String, dynamic>?;
       final meals = results[2] as List<dynamic>;
       final streakRes = results[3] as Map<String, dynamic>?;
 
-      // 3. Calculate Totals
       double cals = 0, prot = 0, carbs = 0, fat = 0;
       for (var m in meals) {
         cals += (m['calories'] ?? 0);
@@ -96,7 +92,6 @@ class HomePage extends StatefulWidget {
         fat += (m['fat_g'] ?? 0);
       }
 
-      // 4. Return Data Object
       return DashboardData(
         waterIntake: (activity?['water_intake_ml'] ?? 0).toInt(),
         waterGoal: (activity?['water_goal_ml'] ?? 3000).toInt(),
@@ -112,7 +107,7 @@ class HomePage extends StatefulWidget {
       );
     } catch (e) {
       debugPrint("Error pre-loading data: $e");
-      return DashboardData(); // Return empty defaults on error
+      return DashboardData();
     }
   }
 
@@ -124,7 +119,7 @@ class _HomePageState extends State<HomePage> {
   int _selectedIndex = 0;
   final _supabase = Supabase.instance.client;
 
-  // State Variables (Initialized with widget.initialData if present)
+  // State Variables 
   late int _waterIntake;
   late int _waterGoal;
   late int _caloriesConsumed;
@@ -140,7 +135,6 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    // Initialize from pre-loaded data OR defaults
     final data = widget.initialData ?? DashboardData();
     _waterIntake = data.waterIntake;
     _waterGoal = data.waterGoal;
@@ -154,7 +148,6 @@ class _HomePageState extends State<HomePage> {
     _carbsGoal = data.carbsGoal;
     _currentStreak = data.streak;
 
-    // If no initial data was passed (e.g. hot reload), fetch it now
     if (widget.initialData == null) {
       _refreshData(); 
     }
@@ -164,9 +157,12 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _selectedIndex = index;
     });
+    // Refresh when switching back to Home to catch any goal updates
+    if (index == 0) {
+      _refreshData();
+    }
   }
 
-  // Allow re-fetching (pull to refresh)
   Future<void> _refreshData() async {
     final data = await HomePage.preloadData();
     if(mounted) {
@@ -188,6 +184,7 @@ class _HomePageState extends State<HomePage> {
 
   void _updateWater(int newAmount) {
     setState(() => _waterIntake = newAmount);
+    _refreshData(); // Refresh to sync goals/streak if needed
   }
 
   void _updateNutrition(double cals, double prot, double carbs, double fat) {
@@ -197,6 +194,7 @@ class _HomePageState extends State<HomePage> {
       _carbsConsumed = carbs.toInt();
       _fatConsumed = fat.toInt();
     });
+    _refreshData(); // Refresh to sync goals/streak if needed
   }
 
   @override
@@ -214,10 +212,11 @@ class _HomePageState extends State<HomePage> {
         carbsGoal: _carbsGoal,
         fat: _fatConsumed,
         fatGoal: _fatGoal,
-        streak: _currentStreak, // Pass streak down
+        streak: _currentStreak, 
       ),
       NutritionPage(onDataChanged: _updateNutrition),
-      const PersonalizedExerciseScreen(),
+      // ✅ FIX: Pass the refresh callback to update streak instantly
+      PersonalizedExerciseScreen(onWorkoutCompleted: _refreshData),
       WaterTrackerPage(onWaterChanged: _updateWater),
       const ProfilePage(),
     ];
@@ -309,7 +308,7 @@ class HomeDashboard extends StatefulWidget {
   final int carbsGoal;
   final int fat;
   final int fatGoal;
-  final int streak; // Added streak param
+  final int streak;
 
   const HomeDashboard({
     super.key,
@@ -380,7 +379,6 @@ class _HomeDashboardState extends State<HomeDashboard> {
     return "Good Evening";
   }
 
-  // --- Step Goal Dialog ---
   void _showStepGoalDialog() {
     final controller = TextEditingController(text: _stepGoal.toString());
     showDialog(
@@ -841,7 +839,6 @@ class GlossyStepsCard extends StatelessWidget {
                   text: TextSpan(
                     children: [
                       TextSpan(text: "$steps", style: const TextStyle(color: kTextWhite, fontWeight: FontWeight.bold)),
-                      // --- MODIFIED: Uses dynamic goal ---
                       TextSpan(text: " / ${_formatGoal(goal)}", style: TextStyle(color: kTextGrey.withOpacity(0.7))),
                     ],
                   ),
@@ -855,7 +852,6 @@ class GlossyStepsCard extends StatelessWidget {
             decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
             child: FractionallySizedBox(
               alignment: Alignment.centerLeft,
-              // --- MODIFIED: Uses dynamic goal calculation ---
               widthFactor: (goal > 0 ? steps / goal : 0.0).clamp(0.0, 1.0),
               child: Container(decoration: BoxDecoration(color: Colors.pinkAccent, borderRadius: BorderRadius.circular(10))),
             ),

@@ -4,7 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'signup_page.dart';
 import 'intro_page.dart'; 
-import 'gender_page.dart'; // Import GenderPage for onboarding
+import 'gender_page.dart'; 
 
 // --- GLOSSY DESIGN CONSTANTS ---
 const Color kDarkTeal = Color(0xFF132F38); 
@@ -25,6 +25,9 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   bool _rememberMe = false;
   bool _isLoading = false;
+  
+  // --- New State Variable for Password Visibility ---
+  bool _isPasswordVisible = false;
 
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -44,7 +47,6 @@ class _LoginPageState extends State<LoginPage> {
     final session = supabase.auth.currentSession;
 
     if (session != null && rememberMe && mounted) {
-      // If session exists, let IntroPage handle the data loading
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const IntroPage(isPostLogin: true)),
@@ -81,10 +83,8 @@ class _LoginPageState extends State<LoginPage> {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('remember_me', _rememberMe);
 
-        // 1. Ensure basic profile exists in 'profiles' table
         await _ensureProfileExists(response.user!);
 
-        // 2. Check if they have completed onboarding (fitness data)
         final fitnessData = await supabase
             .from('user_fitness')
             .select()
@@ -94,15 +94,11 @@ class _LoginPageState extends State<LoginPage> {
         if (!mounted) return;
 
         if (fitnessData == null) {
-          // --- CASE A: FIRST TIME USER ---
-          // No fitness data found -> Go to Onboarding (Gender Page)
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (_) => const GenderScreen()),
           );
         } else {
-          // --- CASE B: RETURNING USER ---
-          // Data found -> Go to Loading Screen -> Home
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (_) => const IntroPage(isPostLogin: true)),
@@ -120,7 +116,6 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  // Ensure profile exists for the user
   Future<void> _ensureProfileExists(User user) async {
     try {
       final profileResponse = await supabase
@@ -162,7 +157,7 @@ class _LoginPageState extends State<LoginPage> {
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [kDarkSlate, kDarkTeal], // Glossy Background
+          colors: [kDarkSlate, kDarkTeal], 
         ),
       ),
       child: Scaffold(
@@ -175,7 +170,6 @@ class _LoginPageState extends State<LoginPage> {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Logo / Icon
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
@@ -194,7 +188,6 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   const SizedBox(height: 20),
 
-                  // Title
                   Text(
                     "Welcome Back",
                     style: GoogleFonts.poppins(
@@ -211,13 +204,15 @@ class _LoginPageState extends State<LoginPage> {
 
                   SizedBox(height: size.height * 0.05),
 
-                  // Inputs
+                  // Email Input
                   _buildGlossyTextField(
                     controller: _emailController,
                     label: "Email",
                     icon: Icons.email_outlined,
                   ),
                   const SizedBox(height: 16),
+                  
+                  // Password Input
                   _buildGlossyTextField(
                     controller: _passwordController,
                     label: "Password",
@@ -326,7 +321,8 @@ class _LoginPageState extends State<LoginPage> {
       ),
       child: TextField(
         controller: controller,
-        obscureText: isPassword,
+        // Toggle logic: If isPassword is true, respect the _isPasswordVisible state.
+        obscureText: isPassword ? !_isPasswordVisible : false,
         style: const TextStyle(color: kTextWhite),
         decoration: InputDecoration(
           prefixIcon: Icon(icon, color: kTextGrey),
@@ -334,6 +330,20 @@ class _LoginPageState extends State<LoginPage> {
           labelStyle: const TextStyle(color: kTextGrey),
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          // Suffix Icon logic
+          suffixIcon: isPassword
+              ? IconButton(
+                  icon: Icon(
+                    _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
+                    color: kTextGrey,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _isPasswordVisible = !_isPasswordVisible;
+                    });
+                  },
+                )
+              : null,
         ),
       ),
     );

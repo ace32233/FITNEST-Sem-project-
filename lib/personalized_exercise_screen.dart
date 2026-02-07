@@ -414,6 +414,7 @@ class WorkoutController extends StateNotifier<WorkoutState> {
     final today = _todayDateKey();
     final groupLabel = (state.muscleGroup?.label ?? 'Unknown');
 
+    // 1. Save Local History
     final history = WorkoutHistory(
       date: today,
       completed: true,
@@ -426,6 +427,7 @@ class WorkoutController extends StateNotifier<WorkoutState> {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
 
+    // 2. Save to 'daily_activities'
     final existingDay = await Supabase.instance.client
         .from('daily_activities')
         .select('id, goals_met, workout_duration_minutes')
@@ -457,8 +459,8 @@ class WorkoutController extends StateNotifier<WorkoutState> {
           .eq('id', existingDay['id']);
     }
 
+    // 3. Save to 'workout_logs'
     final exercisesJson = state.workout.map((e) => e.toJson()).toList();
-
     final existingLog = await Supabase.instance.client
         .from('workout_logs')
         .select('id')
@@ -490,6 +492,52 @@ class WorkoutController extends StateNotifier<WorkoutState> {
           .eq('id', existingLog['id']);
     }
 
+    // --- FIX 1: UPDATE STREAK TABLE IN DB ---
+    // This logic ensures the streak is actually updated in Supabase
+    try {
+      final streakRes = await Supabase.instance.client
+          .from('user_streaks')
+          .select()
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+      int currentStreak = 0;
+      String? lastActivityDate;
+
+      if (streakRes != null) {
+        currentStreak = _asInt(streakRes['current_streak']);
+        lastActivityDate = streakRes['last_activity_date']?.toString();
+      }
+
+      final yesterday = DateTime.now().subtract(const Duration(days: 1))
+          .toIso8601String().split('T')[0];
+      
+      int newStreak = 1;
+      
+      if (lastActivityDate == today) {
+        // Already active today, streak doesn't increase, just maintain
+        newStreak = currentStreak;
+      } else if (lastActivityDate == yesterday) {
+        // Active yesterday, increment
+        newStreak = currentStreak + 1;
+      } else {
+        // Streak broken or first time
+        newStreak = 1;
+      }
+
+      // If user had 0 streak, set to 1
+      if (newStreak < 1) newStreak = 1;
+
+      await Supabase.instance.client.from('user_streaks').upsert({
+        'user_id': user.id,
+        'current_streak': newStreak,
+        'last_activity_date': today,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      debugPrint("Error updating streak: $e");
+    }
+
     _ref.invalidate(todayHistoryProvider);
   }
 }
@@ -504,7 +552,12 @@ final workoutControllerProvider =
 // ==========================================
 
 class PersonalizedExerciseScreen extends ConsumerWidget {
-  const PersonalizedExerciseScreen({super.key});
+  final VoidCallback? onWorkoutCompleted; // ✅ Added callback
+
+  const PersonalizedExerciseScreen({
+    super.key,
+    this.onWorkoutCompleted,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -696,13 +749,15 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
                         text: 'Workout in progress • ${workout.done}/${workout.total} done',
                         actionText: 'Open',
                         color: kAccentBlue,
-                        onAction: () {
-                          Navigator.push(
+                        onAction: () async {
+                          // ✅ FIX: Wait for result and trigger callback
+                          await Navigator.push(
                             context,
                             MaterialPageRoute(
                               builder: (_) => const WorkoutPlayerScreen(),
                             ),
                           );
+                          onWorkoutCompleted?.call(); 
                         },
                       ),
                     if (workout.isFinished)
@@ -728,7 +783,7 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
                         ),
                         onPressed: (workout.isFinished || alreadyDoneToday)
                             ? null
-                            : () {
+                            : () async {
                                 if (!workout.hasWorkout) {
                                   if (!canStart) {
                                     ScaffoldMessenger.of(context).showSnackBar(
@@ -746,12 +801,14 @@ class PersonalizedExerciseScreen extends ConsumerWidget {
                                         group: selectedGroup!,
                                       );
                                 }
-                                Navigator.push(
+                                // ✅ FIX: Wait for result and trigger callback
+                                await Navigator.push(
                                   context,
                                   MaterialPageRoute(
                                     builder: (_) => const WorkoutPlayerScreen(),
                                   ),
                                 );
+                                onWorkoutCompleted?.call();
                               },
                         child: Text(
                           alreadyDoneToday
@@ -1025,8 +1082,6 @@ class _WorkoutStepView extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 12),
-              
-              // ✅ FIXED: Shorter (210), Full Width (BoxFit.cover)
               Container(
                 width: double.infinity,
                 height: 210,
@@ -1278,7 +1333,7 @@ class _InfoBanner extends StatelessWidget {
 
 class _ExerciseGif extends StatelessWidget {
   final String exerciseId;
-  final BoxFit fit; 
+  final BoxFit fit;
   const _ExerciseGif({required this.exerciseId, this.fit = BoxFit.cover});
 
   @override
@@ -1323,7 +1378,7 @@ class _ExerciseGif extends StatelessWidget {
 
         return Image.memory(
           bytes,
-          fit: fit, 
+          fit: fit,
           filterQuality: FilterQuality.medium,
           gaplessPlayback: true,
           errorBuilder: (_, __, ___) {

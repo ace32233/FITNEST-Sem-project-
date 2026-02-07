@@ -26,6 +26,8 @@ class _SignUpPageState extends State<SignUpPage> {
   final _passwordController = TextEditingController();
 
   bool _loading = false;
+  // --- New State Variable for Password Visibility ---
+  bool _isPasswordVisible = false;
 
   @override
   void dispose() {
@@ -147,7 +149,7 @@ class _SignUpPageState extends State<SignUpPage> {
                 // Back Button
                 GestureDetector(
                   onTap: () => Navigator.pop(context),
-                  child: Icon(Icons.arrow_back_ios_new, color: kTextWhite, size: 24),
+                  child: const Icon(Icons.arrow_back_ios_new, color: kTextWhite, size: 24),
                 ),
 
                 const SizedBox(height: 20),
@@ -293,7 +295,8 @@ class _SignUpPageState extends State<SignUpPage> {
       ),
       child: TextField(
         controller: controller,
-        obscureText: isPassword,
+        // Logic to toggle visibility
+        obscureText: isPassword ? !_isPasswordVisible : false,
         style: const TextStyle(color: kTextWhite),
         decoration: InputDecoration(
           prefixIcon: Icon(icon, color: kTextGrey),
@@ -301,6 +304,20 @@ class _SignUpPageState extends State<SignUpPage> {
           labelStyle: const TextStyle(color: kTextGrey),
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          // Suffix Icon Logic
+          suffixIcon: isPassword
+              ? IconButton(
+                  icon: Icon(
+                    _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
+                    color: kTextGrey,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _isPasswordVisible = !_isPasswordVisible;
+                    });
+                  },
+                )
+              : null,
         ),
       ),
     );
