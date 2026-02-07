@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- App name shown in launcher, recent apps, notifications -->
+    <string name="app_name">Fitnest</string>
+
+</resources>
