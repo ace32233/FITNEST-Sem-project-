@@ -33,10 +33,15 @@ class NotificationService {
       // Timezone DB
       tzdata.initializeTimeZones();
 
-      // ✅ HARD FIX: set local timezone explicitly to Nepal
-      // (Remove this line only if you want true device timezone via a plugin)
-      tz.setLocalLocation(tz.getLocation('Asia/Kathmandu'));
-      debugPrint('✅ tz.local set to: Asia/Kathmandu');
+      // Try to set local timezone, fallback to UTC if it fails
+      try {
+        // Default to Nepal as requested by the original design
+        tz.setLocalLocation(tz.getLocation('Asia/Kathmandu'));
+        debugPrint('✅ tz.local set to: Asia/Kathmandu');
+      } catch (e) {
+        debugPrint('⚠️ Could not set local timezone to Asia/Kathmandu: $e. Using UTC.');
+        tz.setLocalLocation(tz.UTC);
+      }
 
       const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
       const iosSettings = DarwinInitializationSettings(
@@ -68,18 +73,21 @@ class NotificationService {
 
   Future<void> _requestPermissions() async {
     try {
+      // Request notification permission for Android 13+
       final status = await Permission.notification.request();
       debugPrint('🔔 Notification permission: $status');
+
+      // Request exact alarm permission for Android 12+
+      if (Platform.isAndroid) {
+        final exactStatus = await Permission.scheduleExactAlarm.request();
+        debugPrint('🔔 Exact alarm permission: $exactStatus');
+      }
 
       if (Platform.isIOS) {
         final iosPlugin = _notifications.resolvePlatformSpecificImplementation<
             IOSFlutterLocalNotificationsPlugin>();
         await iosPlugin?.requestPermissions(alert: true, badge: true, sound: true);
       }
-
-      debugPrint(
-        'Android 12+: If scheduled notifications don’t fire, enable Special Access → Alarms & reminders for this app.',
-      );
     } catch (e) {
       debugPrint('❌ Permission request error: $e');
     }
@@ -137,22 +145,38 @@ class NotificationService {
 
     final scheduledDate = _nextInstanceOfTime(hour, minute);
 
-    await _notifications.zonedSchedule(
-      baseId,
-      title,
-      body,
-      scheduledDate,
-      _details(body),
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
-      matchDateTimeComponents: DateTimeComponents.time, // ✅ daily repeat
-    );
+    try {
+      await _notifications.zonedSchedule(
+        baseId,
+        title,
+        body,
+        scheduledDate,
+        _details(body),
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: DateTimeComponents.time, // ✅ daily repeat
+      );
 
-    debugPrint(
-      '✅ Scheduled DAILY id=$baseId at $hour:${minute.toString().padLeft(2, '0')} -> '
-      '$scheduledDate (tz.local=${tz.local.name})',
-    );
+      debugPrint(
+        '✅ Scheduled DAILY id=$baseId at $hour:${minute.toString().padLeft(2, '0')} -> '
+        '$scheduledDate (tz.local=${tz.local.name})',
+      );
+    } catch (e) {
+      debugPrint('❌ Fallback to inexact schedule due to error: $e');
+      // Fallback to inexact scheduling if exact fails (common on Android 12+ without permission)
+      await _notifications.zonedSchedule(
+        baseId,
+        title,
+        body,
+        scheduledDate,
+        _details(body),
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: DateTimeComponents.time,
+      );
+    }
   }
 
   Future<void> cancelByBaseId(int baseId) async {

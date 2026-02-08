@@ -290,23 +290,30 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
     );
   }
 
+  bool _isSyncing = false;
   Future<void> _syncAllSchedules() async {
-    // Presets
-    for (final r in reminders.values) {
-      try {
-        await _schedulePreset(r);
-      } catch (e) {
-        debugPrint('❌ Preset schedule failed (${r.id}): $e');
+    if (_isSyncing) return;
+    _isSyncing = true;
+    try {
+      // Presets
+      for (final r in reminders.values) {
+        try {
+          await _schedulePreset(r);
+        } catch (e) {
+          debugPrint('❌ Preset schedule failed (${r.id}): $e');
+        }
       }
-    }
 
-    // Custom
-    for (final r in customReminders) {
-      try {
-        await _scheduleCustom(r);
-      } catch (e) {
-        debugPrint('❌ Custom schedule failed (${r['id']}): $e');
+      // Custom
+      for (final r in customReminders) {
+        try {
+          await _scheduleCustom(r);
+        } catch (e) {
+          debugPrint('❌ Custom schedule failed (${r['id']}): $e');
+        }
       }
+    } finally {
+      _isSyncing = false;
     }
   }
 
