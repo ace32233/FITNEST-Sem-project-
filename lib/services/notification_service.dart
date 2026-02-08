@@ -5,6 +5,11 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
+@pragma('vm:entry-point')
+void notificationTapBackground(NotificationResponse notificationResponse) {
+  debugPrint('Background notification tapped: ${notificationResponse.payload}');
+}
+
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
   factory NotificationService() => _instance;
@@ -55,6 +60,7 @@ class NotificationService {
         onDidReceiveNotificationResponse: (NotificationResponse response) {
           debugPrint('Notification tapped: ${response.payload}');
         },
+        onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
       );
 
       _isInitialized = true;
@@ -71,15 +77,19 @@ class NotificationService {
       final status = await Permission.notification.request();
       debugPrint('🔔 Notification permission: $status');
 
+      if (Platform.isAndroid) {
+        // Request exact alarm permission for Android 13+
+        if (await Permission.scheduleExactAlarm.isDenied) {
+          final alarmStatus = await Permission.scheduleExactAlarm.request();
+          debugPrint('🔔 Exact alarm permission: $alarmStatus');
+        }
+      }
+
       if (Platform.isIOS) {
         final iosPlugin = _notifications.resolvePlatformSpecificImplementation<
             IOSFlutterLocalNotificationsPlugin>();
         await iosPlugin?.requestPermissions(alert: true, badge: true, sound: true);
       }
-
-      debugPrint(
-        'Android 12+: If scheduled notifications don’t fire, enable Special Access → Alarms & reminders for this app.',
-      );
     } catch (e) {
       debugPrint('❌ Permission request error: $e');
     }
@@ -91,7 +101,7 @@ class NotificationService {
         'water_reminder_channel',
         'Water Reminders',
         channelDescription: 'Notifications for water intake reminders',
-        importance: Importance.high,
+        importance: Importance.max,
         priority: Priority.high,
         icon: '@mipmap/ic_launcher',
         playSound: true,
@@ -137,17 +147,33 @@ class NotificationService {
 
     final scheduledDate = _nextInstanceOfTime(hour, minute);
 
-    await _notifications.zonedSchedule(
-      baseId,
-      title,
-      body,
-      scheduledDate,
-      _details(body),
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
-      matchDateTimeComponents: DateTimeComponents.time, // ✅ daily repeat
-    );
+    try {
+      await _notifications.zonedSchedule(
+        baseId,
+        title,
+        body,
+        scheduledDate,
+        _details(body),
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: DateTimeComponents.time, // ✅ daily repeat
+      );
+    } catch (e) {
+      debugPrint('⚠️ Falling back to inexact schedule due to: $e');
+      // Fallback for devices where exact alarm permission is missing
+      await _notifications.zonedSchedule(
+        baseId,
+        title,
+        body,
+        scheduledDate,
+        _details(body),
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: DateTimeComponents.time,
+      );
+    }
 
     debugPrint(
       '✅ Scheduled DAILY id=$baseId at $hour:${minute.toString().padLeft(2, '0')} -> '
