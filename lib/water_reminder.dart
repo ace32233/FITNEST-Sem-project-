@@ -51,11 +51,15 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
   }
 
   Future<void> _bootstrap() async {
-    await _notificationService.initialize();
-    await _loadTodayData();
-    await _loadPresetPrefs();
-    await _loadCustomPrefs();
-    await _syncAllSchedules();
+    try {
+      await _notificationService.initialize();
+      await _loadTodayData();
+      await _loadPresetPrefs();
+      await _loadCustomPrefs();
+      await _syncAllSchedules();
+    } catch (e) {
+      debugPrint('Error during bootstrap: $e');
+    }
   }
 
   void _initializeDefaultReminders() {
@@ -320,29 +324,37 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
   // ----------------------- WATER ACTIONS -----------------------
 
   void addWater() {
-    setState(() {
-      currentWater = (currentWater + quickAddAmount <= targetWater)
-          ? currentWater + quickAddAmount
-          : targetWater;
-    });
+    if (mounted) {
+      setState(() {
+        currentWater = (currentWater + quickAddAmount <= targetWater)
+            ? currentWater + quickAddAmount
+            : targetWater;
+      });
+    }
     widget.onWaterChanged?.call(currentWater);
     _updateWaterIntake();
   }
 
   void increaseQuickAddAmount() {
-    setState(() => quickAddAmount += 50);
+    if (mounted) {
+      setState(() => quickAddAmount += 50);
+    }
     _syncAllSchedules(); // keep body consistent with quickAddAmount
   }
 
   void decreaseQuickAddAmount() {
-    setState(() {
-      if (quickAddAmount > 50) quickAddAmount -= 50;
-    });
+    if (mounted) {
+      setState(() {
+        if (quickAddAmount > 50) quickAddAmount -= 50;
+      });
+    }
     _syncAllSchedules();
   }
 
   void resetProgress() {
-    setState(() => currentWater = 0);
+    if (mounted) {
+      setState(() => currentWater = 0);
+    }
     widget.onWaterChanged?.call(currentWater);
     _updateWaterIntake();
   }
@@ -675,7 +687,9 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
 
               return GestureDetector(
                 onTap: () async {
-                  setState(() => reminder.isEnabled = !reminder.isEnabled);
+                  if (mounted) {
+                    setState(() => reminder.isEnabled = !reminder.isEnabled);
+                  }
                   await _savePresetPrefs();
 
                   try {
@@ -954,7 +968,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                                     r['isEnabled'] = v;
 
                                     setDialogState(() {});
-                                    setState(() {});
+                                    if (mounted) setState(() {});
                                     await _saveCustomPrefs();
 
                                     try {
@@ -1033,7 +1047,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                             customReminders.add(newReminder);
 
                             setDialogState(() {});
-                            setState(() {});
+                            if (mounted) setState(() {});
                             await _saveCustomPrefs();
 
                             try {
