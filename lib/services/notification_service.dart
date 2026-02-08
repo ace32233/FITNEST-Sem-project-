@@ -38,10 +38,15 @@ class NotificationService {
       // Timezone DB
       tzdata.initializeTimeZones();
 
-      // ✅ HARD FIX: set local timezone explicitly to Nepal
-      // (Remove this line only if you want true device timezone via a plugin)
-      tz.setLocalLocation(tz.getLocation('Asia/Kathmandu'));
-      debugPrint('✅ tz.local set to: Asia/Kathmandu');
+      // Try to set local timezone, fallback to UTC if it fails
+      try {
+        // Default to Nepal as requested by the original design
+        tz.setLocalLocation(tz.getLocation('Asia/Kathmandu'));
+        debugPrint('✅ tz.local set to: Asia/Kathmandu');
+      } catch (e) {
+        debugPrint('⚠️ Could not set local timezone to Asia/Kathmandu: $e. Using UTC.');
+        tz.setLocalLocation(tz.UTC);
+      }
 
       const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
       const iosSettings = DarwinInitializationSettings(
@@ -74,6 +79,7 @@ class NotificationService {
 
   Future<void> _requestPermissions() async {
     try {
+      // Request notification permission for Android 13+
       final status = await Permission.notification.request();
       debugPrint('🔔 Notification permission: $status');
 
@@ -175,10 +181,25 @@ class NotificationService {
       );
     }
 
-    debugPrint(
-      '✅ Scheduled DAILY id=$baseId at $hour:${minute.toString().padLeft(2, '0')} -> '
-      '$scheduledDate (tz.local=${tz.local.name})',
-    );
+      debugPrint(
+        '✅ Scheduled DAILY id=$baseId at $hour:${minute.toString().padLeft(2, '0')} -> '
+        '$scheduledDate (tz.local=${tz.local.name})',
+      );
+    } catch (e) {
+      debugPrint('❌ Fallback to inexact schedule due to error: $e');
+      // Fallback to inexact scheduling if exact fails (common on Android 12+ without permission)
+      await _notifications.zonedSchedule(
+        baseId,
+        title,
+        body,
+        scheduledDate,
+        _details(body),
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: DateTimeComponents.time,
+      );
+    }
   }
 
   Future<void> cancelByBaseId(int baseId) async {
