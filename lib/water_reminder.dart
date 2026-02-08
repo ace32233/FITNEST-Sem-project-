@@ -191,7 +191,10 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
         final data = map[id];
         if (data is Map) {
           entry.value.isEnabled = (data['isEnabled'] ?? false) == true;
-          // keep days for UI only
+          if (data['hour'] != null) entry.value.hour = data['hour'];
+          if (data['minute'] != null) entry.value.minute = data['minute'];
+          if (data['time'] != null) entry.value.time = data['time'];
+
           final days = data['activeDays'];
           if (days is List) {
             entry.value.activeDays = Set<int>.from(days);
@@ -212,6 +215,9 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
         out[e.key] = {
           'isEnabled': e.value.isEnabled,
           'activeDays': e.value.activeDays.toList(),
+          'hour': e.value.hour,
+          'minute': e.value.minute,
+          'time': e.value.time,
         };
       }
       await prefs.setString(_prefsPresetKey, jsonEncode(out));
@@ -261,15 +267,14 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
       return;
     }
 
-    // ✅ daily schedule (service must implement daily behavior)
+    // ✅ schedules based on activeDays
     await _notificationService.scheduleWaterReminder(
       baseId: baseId,
       title: 'Time to Drink Water! 💧',
       body: 'Stay hydrated! Drink ${quickAddAmount}ml of water now.',
       hour: r.hour,
       minute: r.minute,
-      // ignored by daily service, but kept for compatibility
-      activeDays: const {0, 1, 2, 3, 4, 5, 6},
+      activeDays: r.activeDays,
     );
   }
 
@@ -289,7 +294,6 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
       body: 'Stay hydrated!',
       hour: r['hour'] as int,
       minute: r['minute'] as int,
-      // ignored by daily service
       activeDays: const {0, 1, 2, 3, 4, 5, 6},
     );
   }
@@ -805,12 +809,72 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Time: ${reminder.time}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: kAccentCyan,
+                    InkWell(
+                      onTap: () async {
+                        final TimeOfDay? picked = await showTimePicker(
+                          context: context,
+                          initialTime: TimeOfDay(
+                            hour: reminder.hour,
+                            minute: reminder.minute,
+                          ),
+                          builder: (context, child) {
+                            return Theme(
+                              data: ThemeData.dark().copyWith(
+                                colorScheme: const ColorScheme.dark(
+                                  primary: kAccentCyan,
+                                  onPrimary: kDarkSlate,
+                                  surface: kCardSurface,
+                                  onSurface: kTextWhite,
+                                ),
+                              ),
+                              child: child!,
+                            );
+                          },
+                        );
+                        if (picked != null && context.mounted) {
+                          setDialogState(() {
+                            reminder.hour = picked.hour;
+                            reminder.minute = picked.minute;
+                            reminder.time = picked.format(context);
+                          });
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 12, horizontal: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: kGlassBorder),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.access_time_rounded,
+                                color: kAccentCyan),
+                            const SizedBox(width: 12),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Reminder Time',
+                                  style: TextStyle(
+                                      color: kTextGrey, fontSize: 12),
+                                ),
+                                Text(
+                                  reminder.time,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: kTextWhite,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const Spacer(),
+                            const Icon(Icons.edit,
+                                color: kTextGrey, size: 16),
+                          ],
+                        ),
                       ),
                     ),
                     const SizedBox(height: 20),
@@ -856,7 +920,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                           debugPrint('❌ Preset settings schedule failed: $e');
                         }
                       }
-                      Navigator.pop(context);
+                      if (context.mounted) Navigator.pop(context);
                     },
                     child:
                         const Text('Save', style: TextStyle(color: kAccentBlue)),
@@ -1024,7 +1088,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                             },
                           );
 
-                          if (picked != null) {
+                          if (picked != null && context.mounted) {
                             final id =
                                 'custom_${DateTime.now().millisecondsSinceEpoch}';
 
@@ -1145,7 +1209,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
                     debugPrint('Error updating target: $e');
                   }
 
-                  Navigator.pop(context);
+                  if (context.mounted) Navigator.pop(context);
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: kAccentBlue,
@@ -1176,6 +1240,7 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
           .order('activity_date', ascending: false)
           .limit(30);
 
+      if (!context.mounted) return;
       showDialog(
         context: context,
         builder: (context) {
@@ -1274,11 +1339,11 @@ class _WaterTrackerPageState extends State<WaterTrackerPage> {
 class ReminderData {
   final String id;
   final String label;
-  final String time;
-  final int hour;
-  final int minute;
+  String time;
+  int hour;
+  int minute;
   bool isEnabled;
-  Set<int> activeDays; // UI only now
+  Set<int> activeDays;
 
   ReminderData({
     required this.id,

@@ -38,10 +38,15 @@ class NotificationService {
       // Timezone DB
       tzdata.initializeTimeZones();
 
-      // ✅ HARD FIX: set local timezone explicitly to Nepal
-      // (Remove this line only if you want true device timezone via a plugin)
-      tz.setLocalLocation(tz.getLocation('Asia/Kathmandu'));
-      debugPrint('✅ tz.local set to: Asia/Kathmandu');
+      // Attempt to set local timezone from device, fallback to Kathmandu
+      try {
+        final String timeZoneName = DateTime.now().timeZoneName;
+        tz.setLocalLocation(tz.getLocation(timeZoneName));
+        debugPrint('✅ tz.local set to device timezone: $timeZoneName');
+      } catch (e) {
+        tz.setLocalLocation(tz.getLocation('Asia/Kathmandu'));
+        debugPrint('⚠️ Falling back to default timezone: Asia/Kathmandu');
+      }
 
       const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
       const iosSettings = DarwinInitializationSettings(
@@ -116,7 +121,7 @@ class NotificationService {
     );
   }
 
-  tz.TZDateTime _nextInstanceOfTime(int hour, int minute) {
+  tz.TZDateTime _nextInstanceOfTime(int hour, int minute, {int? dayOfWeek}) {
     final now = tz.TZDateTime.now(tz.local);
     var scheduled = tz.TZDateTime(
       tz.local,
@@ -126,30 +131,86 @@ class NotificationService {
       hour,
       minute,
     );
-    if (scheduled.isBefore(now)) {
-      scheduled = scheduled.add(const Duration(days: 1));
+
+    if (dayOfWeek != null) {
+      // Adjust to the specific day of week
+      while (scheduled.weekday != dayOfWeek) {
+        scheduled = scheduled.add(const Duration(days: 1));
+      }
+      // If it's already today and the time has passed, move to next week
+      if (scheduled.isBefore(now)) {
+        scheduled = scheduled.add(const Duration(days: 7));
+      }
+    } else {
+      // Daily: if time has passed today, move to tomorrow
+      if (scheduled.isBefore(now)) {
+        scheduled = scheduled.add(const Duration(days: 1));
+      }
     }
     return scheduled;
   }
 
-  /// DAILY reminder at hour:minute (activeDays ignored; kept for compatibility)
+  /// Schedules a water reminder. If activeDays is null or all 7 days, schedules daily.
+  /// Otherwise schedules for each specific day.
   Future<void> scheduleWaterReminder({
     required int baseId,
     required String title,
     required String body,
     required int hour,
     required int minute,
-    Set<int>? activeDays, // ignored (daily only)
+    Set<int>? activeDays,
   }) async {
     if (!_isInitialized) await initialize();
 
+    // Cancel all previous instances for this reminder
     await cancelByBaseId(baseId);
 
-    final scheduledDate = _nextInstanceOfTime(hour, minute);
+    // If activeDays is empty, don't schedule anything
+    if (activeDays != null && activeDays.isEmpty) return;
 
+    // Determine if we should schedule as a single daily reminder or multiple weekly ones
+    bool isDaily = activeDays == null || activeDays.length == 7;
+
+    if (isDaily) {
+      final scheduledDate = _nextInstanceOfTime(hour, minute);
+      await _scheduleZoned(
+        id: baseId,
+        title: title,
+        body: body,
+        scheduledDate: scheduledDate,
+        matchComponents: DateTimeComponents.time,
+      );
+      debugPrint('✅ Scheduled DAILY id=$baseId at $hour:${minute.toString().padLeft(2, '0')}');
+    } else {
+      for (int day in activeDays) {
+        // Map 0 (Sunday) to 7 (DateTime.sunday)
+        int weekday = day == 0 ? DateTime.sunday : day;
+        // Use a unique ID for each day to avoid collisions
+        int notificationId = baseId + weekday;
+        final scheduledDate = _nextInstanceOfTime(hour, minute, dayOfWeek: weekday);
+
+        await _scheduleZoned(
+          id: notificationId,
+          title: title,
+          body: body,
+          scheduledDate: scheduledDate,
+          matchComponents: DateTimeComponents.dayOfWeekAndTime,
+        );
+        debugPrint('✅ Scheduled WEEKLY id=$notificationId (day $weekday) at $hour:${minute.toString().padLeft(2, '0')}');
+      }
+    }
+  }
+
+  Future<void> _scheduleZoned({
+    required int id,
+    required String title,
+    required String body,
+    required tz.TZDateTime scheduledDate,
+    required DateTimeComponents matchComponents,
+  }) async {
     try {
       await _notifications.zonedSchedule(
-        baseId,
+        id,
         title,
         body,
         scheduledDate,
@@ -157,13 +218,12 @@ class NotificationService {
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: DateTimeComponents.time, // ✅ daily repeat
+        matchDateTimeComponents: matchComponents,
       );
     } catch (e) {
-      debugPrint('⚠️ Falling back to inexact schedule due to: $e');
-      // Fallback for devices where exact alarm permission is missing
+      debugPrint('⚠️ Falling back to inexact schedule for id=$id: $e');
       await _notifications.zonedSchedule(
-        baseId,
+        id,
         title,
         body,
         scheduledDate,
@@ -171,22 +231,22 @@ class NotificationService {
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: DateTimeComponents.time,
+        matchDateTimeComponents: matchComponents,
       );
     }
-
-    debugPrint(
-      '✅ Scheduled DAILY id=$baseId at $hour:${minute.toString().padLeft(2, '0')} -> '
-      '$scheduledDate (tz.local=${tz.local.name})',
-    );
   }
 
   Future<void> cancelByBaseId(int baseId) async {
     try {
+      // Cancel the daily one
       await _notifications.cancel(baseId);
-      debugPrint('✓ Cancelled id=$baseId');
+      // Cancel all possible weekly ones (1-7)
+      for (int i = 1; i <= 7; i++) {
+        await _notifications.cancel(baseId + i);
+      }
+      debugPrint('✓ Cancelled all notifications related to baseId=$baseId');
     } catch (e) {
-      debugPrint('❌ Cancel error id=$baseId: $e');
+      debugPrint('❌ Cancel error for baseId=$baseId: $e');
     }
   }
 
