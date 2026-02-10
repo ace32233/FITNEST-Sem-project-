@@ -4,7 +4,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter/rendering.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'services/notification_service.dart';
+import 'services/step_service.dart'; // ✅ ADDED: Step counter service
 
 // --- PAGE IMPORTS ---
 import 'intro_page.dart';
@@ -20,13 +22,11 @@ void main() async {
   debugRepaintRainbowEnabled = false;
 
   WidgetsFlutterBinding.ensureInitialized();
+  
   // Load environment variables
   await dotenv.load(fileName: ".env");
   print("ENV LOADED => ${dotenv.env}");
   print("KEY1 => ${dotenv.env['EXERCISE_API_KEY_1']}");
-
-
-
 
   // Get Supabase credentials from .env
   final supabaseUrl = dotenv.env['SUPABASE_URL'];
@@ -43,15 +43,39 @@ void main() async {
     anonKey: supabaseAnonKey,
   );
 
+  // ADDED: Request permissions for step counter
+  await _requestPermissions();
+
+  //  ADDED: Initialize Step Service
+  // This starts the background step counter that will persist even when app is closed
+  await StepService.instance.initAndStart(enableAndroidForeground: true);
+  print(" Step Service initialized and started");
+
   // Initialize Notifications
-  WidgetsBinding.instance.addPostFrameCallback((_) async {
-    await NotificationService().initialize();
-  });
+  await NotificationService().initialize();
+  
   runApp(
     const ProviderScope(
       child: MyApp(),
     ),
   );
+}
+
+//Request all necessary permissions for step counting
+Future<void> _requestPermissions() async {
+  try {
+    // Activity Recognition permission (Required for step counting)
+    final activityStatus = await Permission.activityRecognition.request();
+    print("Activity Recognition Permission: $activityStatus");
+    
+    // Notification permission (Required for Android 13+ to show foreground service notification)
+    final notificationStatus = await Permission.notification.request();
+    print("Notification Permission: $notificationStatus");
+    
+    
+  } catch (e) {
+    print("❌ Error requesting permissions: $e");
+  }
 }
 
 class MyApp extends StatelessWidget {

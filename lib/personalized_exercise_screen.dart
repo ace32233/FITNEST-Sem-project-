@@ -212,7 +212,7 @@ final exercisesForGroupProvider = FutureProvider.autoDispose<List<Exercise>>((re
     if (seen.add(key)) unique.add(ex);
   }
 
-  if (unique.length > 80) return unique.sublist(0, 80);
+  if (unique.length > 7) return unique.sublist(0, 7);
   return unique;
 });
 
@@ -271,909 +271,1299 @@ class HistoryRepo {
   }
 
   Future<void> save(WorkoutHistory history) async {
+    // Save to SharedPreferences
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_prefsKey);
 
-    Map<String, dynamic> map = {};
-    if (raw != null) {
-      final decoded = json.decode(raw);
-      if (decoded is Map) map = Map<String, dynamic>.from(decoded);
-    }
+    final decoded = (raw != null && raw.isNotEmpty)
+        ? (json.decode(raw) as Map<String, dynamic>? ?? {})
+        : <String, dynamic>{};
 
-    map[history.date] = history.toJson();
-    await prefs.setString(_prefsKey, json.encode(map));
+    decoded[history.date] = history.toJson();
+    await prefs.setString(_prefsKey, json.encode(decoded));
+    
+    // Save to Supabase
+    try {
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      if (userId != null) {
+        await Supabase.instance.client.from('workout_history').upsert({
+          'user_id': userId,
+          'date': history.date,
+          'completed': history.completed,
+          'duration_minutes': history.durationMinutes,
+          'muscle_group': history.muscleGroup,
+          'exercise_ids': history.exerciseIds,
+          'updated_at': DateTime.now().toIso8601String(),
+        }, onConflict: 'user_id,date');
+      }
+    } catch (e) {
+      // Log error but don't fail the save - local storage is primary
+      print('Error saving to Supabase: $e');
+    }
   }
 }
 
 final historyRepoProvider = Provider<HistoryRepo>((ref) => HistoryRepo());
+
 final todayHistoryProvider = FutureProvider.autoDispose<WorkoutHistory?>((ref) async {
-  return ref.read(historyRepoProvider).getToday();
+  final repo = ref.watch(historyRepoProvider);
+  return repo.getToday();
 });
 
-@immutable
-class WorkoutState {
-  final List<Exercise> workout;
-  final int index;
-  final Set<String> completedIds;
-  final DateTime? startedAt;
-  final MuscleGroup? muscleGroup;
+// --- MAIN SCREEN ---
 
-  const WorkoutState({
-    required this.workout,
-    required this.index,
-    required this.completedIds,
-    required this.startedAt,
-    required this.muscleGroup,
-  });
-
-  bool get hasWorkout => workout.isNotEmpty;
-  bool get isFinished => hasWorkout && completedIds.length >= workout.length;
-  int get total => workout.length;
-  int get done => completedIds.length;
-
-  Exercise? get current {
-    if (!hasWorkout) return null;
-    final safe = index.clamp(0, workout.length - 1);
-    return workout[safe];
-  }
-
-  WorkoutState copyWith({
-    List<Exercise>? workout,
-    int? index,
-    Set<String>? completedIds,
-    DateTime? startedAt,
-    MuscleGroup? muscleGroup,
-  }) {
-    return WorkoutState(
-      workout: workout ?? this.workout,
-      index: index ?? this.index,
-      completedIds: completedIds ?? this.completedIds,
-      startedAt: startedAt ?? this.startedAt,
-      muscleGroup: muscleGroup ?? this.muscleGroup,
-    );
-  }
-
-  static WorkoutState empty() => const WorkoutState(
-        workout: [],
-        index: 0,
-        completedIds: {},
-        startedAt: null,
-        muscleGroup: null,
-      );
-}
-
-class WorkoutController extends StateNotifier<WorkoutState> {
-  WorkoutController(this._ref) : super(WorkoutState.empty());
-  final Ref _ref;
-  bool _isSaving = false;
-
-  void reset() {
-    state = WorkoutState.empty();
-    _isSaving = false;
-  }
-
-  void startFromSource(List<Exercise> source, {required MuscleGroup group}) {
-    if (source.length < 3) {
-      state = WorkoutState.empty();
-      return;
-    }
-    final maxLen = min(6, source.length);
-    final len = max(3, maxLen);
-    final picked = _pickUniqueRandom(source, len);
-
-    state = WorkoutState(
-      workout: picked,
-      index: 0,
-      completedIds: {},
-      startedAt: DateTime.now(),
-      muscleGroup: group,
-    );
-    _isSaving = false;
-  }
-
-  void completeCurrentAndNext() {
-    if (state.isFinished || _isSaving) return;
-    final cur = state.current;
-    if (cur == null) return;
-
-    final newCompleted = {...state.completedIds, cur.id};
-    final nextIndex = min(state.workout.length - 1, state.index + 1);
-    state = state.copyWith(completedIds: newCompleted, index: nextIndex);
-
-    if (state.isFinished) _persistCompletion();
-  }
-
-  void goPrev() {
-    if (!state.hasWorkout) return;
-    state = state.copyWith(index: max(0, state.index - 1));
-  }
-
-  void goNext() {
-    if (!state.hasWorkout) return;
-    state = state.copyWith(
-      index: min(state.workout.length - 1, state.index + 1),
-    );
-  }
-
-  static List<Exercise> _pickUniqueRandom(List<Exercise> source, int count) {
-    final rng = Random();
-    final indices = <int>{};
-    final safeCount = min(count, source.length);
-    while (indices.length < safeCount) {
-      indices.add(rng.nextInt(source.length));
-    }
-    return indices.map((i) => source[i]).toList();
-  }
-
-  Future<void> _persistCompletion() async {
-    if (_isSaving) return;
-    _isSaving = true;
-
-    final startedAt = state.startedAt ?? DateTime.now();
-    final minutes = max(1, DateTime.now().difference(startedAt).inMinutes);
-    final today = _todayDateKey();
-    final groupLabel = (state.muscleGroup?.label ?? 'Unknown');
-
-    // 1. Save Local History
-    final history = WorkoutHistory(
-      date: today,
-      completed: true,
-      durationMinutes: minutes,
-      muscleGroup: groupLabel,
-      exerciseIds: state.workout.map((e) => e.id).toList(),
-    );
-    await _ref.read(historyRepoProvider).save(history);
-
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) return;
-
-    // 2. Save to 'daily_activities'
-    final existingDay = await Supabase.instance.client
-        .from('daily_activities')
-        .select('id, goals_met, workout_duration_minutes')
-        .eq('user_id', user.id)
-        .eq('activity_date', today)
-        .maybeSingle();
-
-    if (existingDay == null) {
-      await Supabase.instance.client.from('daily_activities').insert({
-        'user_id': user.id,
-        'activity_date': today,
-        'workout_completed': true,
-        'workout_duration_minutes': minutes,
-        'is_active_day': true,
-        'goals_met': 1,
-      });
-    } else {
-      final prevGoals = _asInt(existingDay['goals_met']);
-      final prevWorkoutMinutes = _asInt(existingDay['workout_duration_minutes']);
-      await Supabase.instance.client
-          .from('daily_activities')
-          .update({
-            'workout_completed': true,
-            'workout_duration_minutes': max(prevWorkoutMinutes, minutes),
-            'is_active_day': true,
-            'goals_met': prevGoals + 1,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', existingDay['id']);
-    }
-
-    // 3. Save to 'workout_logs'
-    final exercisesJson = state.workout.map((e) => e.toJson()).toList();
-    final existingLog = await Supabase.instance.client
-        .from('workout_logs')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('activity_date', today)
-        .maybeSingle();
-
-    if (existingLog == null) {
-      await Supabase.instance.client.from('workout_logs').insert({
-        'user_id': user.id,
-        'activity_date': today,
-        'muscle_group': groupLabel,
-        'duration_minutes': minutes,
-        'total_exercises': state.workout.length,
-        'completed_exercises': state.completedIds.length,
-        'exercises': exercisesJson,
-      });
-    } else {
-      await Supabase.instance.client
-          .from('workout_logs')
-          .update({
-            'muscle_group': groupLabel,
-            'duration_minutes': minutes,
-            'total_exercises': state.workout.length,
-            'completed_exercises': state.completedIds.length,
-            'exercises': exercisesJson,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', existingLog['id']);
-    }
-
-    // --- FIX 1: UPDATE STREAK TABLE IN DB ---
-    // This logic ensures the streak is actually updated in Supabase
-    try {
-      final streakRes = await Supabase.instance.client
-          .from('user_streaks')
-          .select()
-          .eq('user_id', user.id)
-          .maybeSingle();
-
-      int currentStreak = 0;
-      String? lastActivityDate;
-
-      if (streakRes != null) {
-        currentStreak = _asInt(streakRes['current_streak']);
-        lastActivityDate = streakRes['last_activity_date']?.toString();
-      }
-
-      final yesterday = DateTime.now().subtract(const Duration(days: 1))
-          .toIso8601String().split('T')[0];
-      
-      int newStreak = 1;
-      
-      if (lastActivityDate == today) {
-        // Already active today, streak doesn't increase, just maintain
-        newStreak = currentStreak;
-      } else if (lastActivityDate == yesterday) {
-        // Active yesterday, increment
-        newStreak = currentStreak + 1;
-      } else {
-        // Streak broken or first time
-        newStreak = 1;
-      }
-
-      // If user had 0 streak, set to 1
-      if (newStreak < 1) newStreak = 1;
-
-      await Supabase.instance.client.from('user_streaks').upsert({
-        'user_id': user.id,
-        'current_streak': newStreak,
-        'last_activity_date': today,
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-    } catch (e) {
-      debugPrint("Error updating streak: $e");
-    }
-
-    _ref.invalidate(todayHistoryProvider);
-  }
-}
-
-final workoutControllerProvider =
-    StateNotifierProvider<WorkoutController, WorkoutState>(
-      (ref) => WorkoutController(ref),
-    );
-
-// ==========================================
-// SCREEN WIDGET
-// ==========================================
-
-class PersonalizedExerciseScreen extends ConsumerWidget {
-  final VoidCallback? onWorkoutCompleted; // ✅ Added callback
-
-  const PersonalizedExerciseScreen({
-    super.key,
-    this.onWorkoutCompleted,
-  });
+class PersonalizedExerciseScreen extends ConsumerStatefulWidget {
+  final VoidCallback? onWorkoutCompleted;
+  
+  const PersonalizedExerciseScreen({super.key, this.onWorkoutCompleted});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final profileAsync = ref.watch(userProfileProvider);
+  ConsumerState<PersonalizedExerciseScreen> createState() =>
+      _PersonalizedExerciseScreenState();
+}
+
+class _PersonalizedExerciseScreenState extends ConsumerState<PersonalizedExerciseScreen> {
+  MuscleGroup? _selectedGroup;
+  bool _inWorkout = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final asyncProf = ref.watch(userProfileProvider);
+    final level = ref.watch(personalizedLevelProvider);
     final selectedGroup = ref.watch(selectedGroupProvider);
-    final exercisesAsync = ref.watch(exercisesForGroupProvider);
-    final workout = ref.watch(workoutControllerProvider);
-    final todayHistoryAsync = ref.watch(todayHistoryProvider);
 
-    final bool alreadyDoneToday =
-        todayHistoryAsync.valueOrNull?.completed ?? false;
-
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [kDarkSlate, kDarkTeal],
+    return Scaffold(
+      backgroundColor: kDarkSlate,
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        flexibleSpace: ClipRRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    kDarkTeal.withOpacity(0.8),
+                    kDarkSlate.withOpacity(0.8),
+                  ],
+                ),
+                border: const Border(
+                  bottom: BorderSide(color: kGlassBorder, width: 1),
+                ),
+              ),
+            ),
+          ),
+        ),
+        title: const Text(
+          'Personalized Workout',
+          style: TextStyle(
+            color: kTextWhite,
+            fontWeight: FontWeight.bold,
+            fontSize: 20,
+          ),
+        ),
+        centerTitle: true,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, color: kTextWhite),
+          onPressed: () => Navigator.pop(context),
         ),
       ),
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          elevation: 0,
-          backgroundColor: Colors.transparent,
-          automaticallyImplyLeading: false,
-          title: const Text(
-            'Personalized Exercises',
-            style: TextStyle(color: kTextWhite, fontWeight: FontWeight.bold),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              kDarkTeal,
+              kDarkSlate,
+              kDarkSlate,
+            ],
           ),
-          centerTitle: true,
         ),
-        body: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              profileAsync.when(
-                data: (p) => _ProfileCard(
-                  age: p.age,
-                  bmi: p.bmi,
-                  level: ref.watch(personalizedLevelProvider),
-                ),
-                loading: () => const _SkeletonBox(height: 56),
-                error: (e, _) => Text(
-                  'Profile error: $e',
-                  style: const TextStyle(color: Colors.red),
-                ),
-              ),
-              const SizedBox(height: 12),
-              todayHistoryAsync.when(
-                data: (h) {
-                  if (h == null || h.completed != true)
-                    return const SizedBox.shrink();
-                  return _InfoBanner(
-                    icon: Icons.check_circle,
-                    text: 'Today completed • ${h.durationMinutes} min • ${h.muscleGroup}',
-                    color: kAccentCyan,
-                  );
-                },
-                loading: () => const SizedBox.shrink(),
-                error: (_, __) => const SizedBox.shrink(),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'Choose muscle group',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: kTextWhite,
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                height: 44,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: MuscleGroup.values.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 10),
-                  itemBuilder: (context, i) {
-                    final g = MuscleGroup.values[i];
-                    final isSelected = g == selectedGroup;
-                    return InkWell(
-                      onTap: () {
-                        ref.read(workoutControllerProvider.notifier).reset();
-                        ref.read(selectedGroupProvider.notifier).state = g;
+        child: SafeArea(
+          child: asyncProf.when(
+            data: (profile) {
+              return _inWorkout
+                  ? _WorkoutSessionView(
+                      onDone: () {
+                        setState(() => _inWorkout = false);
+                        // Call the callback when workout is completed
+                        widget.onWorkoutCompleted?.call();
                       },
-                      borderRadius: BorderRadius.circular(22),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? kAccentCyan.withOpacity(0.8)
-                              : kCardSurface.withOpacity(0.6),
-                          borderRadius: BorderRadius.circular(22),
-                          border: Border.all(
-                            color: isSelected ? kAccentCyan : kGlassBorder,
-                            width: 1,
-                          ),
-                        ),
-                        child: Text(
-                          g.label,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: isSelected ? kDarkSlate : kTextWhite,
-                          ),
-                        ),
-                      ),
-                    );
-                  },
+                    )
+                  : _buildMainView(profile, level, selectedGroup);
+            },
+            loading: () => const Center(
+              child: CircularProgressIndicator(color: kAccentCyan),
+            ),
+            error: (e, _) => Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: _InfoBanner(
+                  icon: Icons.error_outline,
+                  text: 'Error loading profile: ${e.toString()}',
+                  color: Colors.redAccent,
                 ),
               ),
-              const SizedBox(height: 14),
-              Text(
-                selectedGroup == null
-                    ? 'Exercises'
-                    : 'Exercises for: ${selectedGroup.label}',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: kTextWhite,
-                ),
-              ),
-              const SizedBox(height: 10),
-              if (workout.hasWorkout)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: _WorkoutProgress(
-                    done: workout.done,
-                    total: workout.total,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMainView(UserProfile profile, String level, MuscleGroup? selectedGroup) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildProfileCard(profile, level),
+          const SizedBox(height: 24),
+          _buildTodayWorkoutBanner(),
+          const SizedBox(height: 24),
+          _buildMuscleGroupSection(selectedGroup),
+          const SizedBox(height: 20),
+          if (selectedGroup != null) ...[
+            _buildExerciseList(selectedGroup),
+            const SizedBox(height: 24),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProfileCard(UserProfile profile, String level) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            kCardSurface.withOpacity(0.9),
+            kCardSurface.withOpacity(0.7),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: kGlassBorder, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: kAccentCyan.withOpacity(0.1),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [kAccentCyan.withOpacity(0.3), kAccentBlue.withOpacity(0.3)],
                   ),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: kAccentCyan.withOpacity(0.5)),
                 ),
+                child: const Icon(Icons.person_outline, color: kAccentCyan, size: 28),
+              ),
+              const SizedBox(width: 16),
               Expanded(
-                child: exercisesAsync.when(
-                  data: (items) {
-                    if (selectedGroup == null) {
-                      return const Center(
-                        child: Text(
-                          'Select a muscle group to load exercises.',
-                          style: TextStyle(color: kTextGrey),
-                        ),
-                      );
-                    }
-                    if (items.isEmpty) {
-                      return const Center(
-                        child: Text(
-                          'No exercises found.',
-                          style: TextStyle(color: kTextGrey),
-                        ),
-                      );
-                    }
-                    return ListView.separated(
-                      itemCount: items.length,
-                      cacheExtent: 1000,
-                      separatorBuilder: (_, __) => const SizedBox(height: 12),
-                      itemBuilder: (context, i) => _ExerciseCard(ex: items[i]),
-                    );
-                  },
-                  loading: () => const Center(
-                    child: CircularProgressIndicator(color: kAccentCyan),
-                  ),
-                  error: (e, _) => Center(
-                    child: Text(
-                      'Exercises error: $e',
-                      style: const TextStyle(color: Colors.red),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Your Profile',
+                      style: TextStyle(
+                        color: kTextGrey,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.5,
+                      ),
                     ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${profile.gender}, ${profile.age} years',
+                      style: const TextStyle(
+                        color: kTextWhite,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [kAccentCyan, kAccentBlue],
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: kAccentCyan.withOpacity(0.3),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Text(
+                  level,
+                  style: const TextStyle(
+                    color: kDarkSlate,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
                   ),
                 ),
               ),
             ],
           ),
-        ),
-        bottomNavigationBar: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-            child: exercisesAsync.when(
-              data: (items) {
-                final canStart = selectedGroup != null && items.length >= 3;
+          const SizedBox(height: 20),
+          Divider(color: kGlassBorder, thickness: 1),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _buildStatItem(
+                  'Weight',
+                  '${profile.weightKg.toStringAsFixed(1)} kg',
+                  Icons.fitness_center,
+                ),
+              ),
+              Container(
+                width: 1,
+                height: 40,
+                color: kGlassBorder,
+              ),
+              Expanded(
+                child: _buildStatItem(
+                  'Height',
+                  '${profile.heightCm.toStringAsFixed(0)} cm',
+                  Icons.height,
+                ),
+              ),
+              Container(
+                width: 1,
+                height: 40,
+                color: kGlassBorder,
+              ),
+              Expanded(
+                child: _buildStatItem(
+                  'BMI',
+                  profile.bmi.toStringAsFixed(1),
+                  Icons.monitor_weight_outlined,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
+  Widget _buildStatItem(String label, String value, IconData icon) {
+    return Column(
+      children: [
+        Icon(icon, color: kAccentCyan.withOpacity(0.7), size: 20),
+        const SizedBox(height: 6),
+        Text(
+          value,
+          style: const TextStyle(
+            color: kTextWhite,
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: TextStyle(
+            color: kTextGrey.withOpacity(0.8),
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTodayWorkoutBanner() {
+    final historyAsync = ref.watch(todayHistoryProvider);
+    return historyAsync.when(
+      data: (h) {
+        if (h == null) {
+          return _InfoBanner(
+            icon: Icons.info_outline,
+            text: 'No workout completed today',
+            color: kAccentBlue,
+          );
+        }
+        if (h.completed) {
+          return Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Colors.green.withOpacity(0.2),
+                  Colors.green.withOpacity(0.1),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.green.withOpacity(0.4), width: 1.5),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    if (workout.hasWorkout && !workout.isFinished)
-                      _InfoBanner(
-                        icon: Icons.fitness_center,
-                        text: 'Workout in progress • ${workout.done}/${workout.total} done',
-                        actionText: 'Open',
-                        color: kAccentBlue,
-                        onAction: () async {
-                          // ✅ FIX: Wait for result and trigger callback
-                          await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const WorkoutPlayerScreen(),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withOpacity(0.3),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.check_circle, color: Colors.greenAccent, size: 24),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Workout Completed!',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.greenAccent,
+                              fontSize: 16,
                             ),
-                          );
-                          onWorkoutCompleted?.call(); 
-                        },
-                      ),
-                    if (workout.isFinished)
-                      const _InfoBanner(
-                        icon: Icons.celebration,
-                        text: 'Workout completed for today 🎉',
-                        color: Colors.greenAccent,
-                      ),
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 54,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              (workout.isFinished || alreadyDoneToday)
-                                  ? Colors.grey.withOpacity(0.3)
-                                  : kAccentCyan,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
                           ),
-                          foregroundColor: kDarkSlate,
-                        ),
-                        onPressed: (workout.isFinished || alreadyDoneToday)
-                            ? null
-                            : () async {
-                                if (!workout.hasWorkout) {
-                                  if (!canStart) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text('Pick a group with at least 3 exercises.'),
-                                        backgroundColor: Colors.redAccent,
-                                      ),
-                                    );
-                                    return;
-                                  }
-                                  ref
-                                      .read(workoutControllerProvider.notifier)
-                                      .startFromSource(
-                                        items,
-                                        group: selectedGroup!,
-                                      );
-                                }
-                                // ✅ FIX: Wait for result and trigger callback
-                                await Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => const WorkoutPlayerScreen(),
-                                  ),
-                                );
-                                onWorkoutCompleted?.call();
-                              },
-                        child: Text(
-                          alreadyDoneToday
-                              ? 'Come back tomorrow!'
-                              : (workout.hasWorkout
-                                  ? 'Continue Workout'
-                                  : 'Start Workout (3-6)'),
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
+                          const SizedBox(height: 4),
+                          Text(
+                            '${h.muscleGroup} • ${h.durationMinutes} min • ${h.exerciseIds.length} exercises',
+                            style: const TextStyle(
+                              color: kTextGrey,
+                              fontSize: 12,
+                            ),
                           ),
-                        ),
+                        ],
                       ),
                     ),
                   ],
-                );
-              },
-              loading: () => const SizedBox(
-                height: 54,
-                child: Center(
-                  child: CircularProgressIndicator(color: kAccentCyan),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.schedule, color: Colors.orange, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Come back tomorrow to train another muscle group!',
+                          style: TextStyle(
+                            color: Colors.orange.shade200,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        return _InfoBanner(
+          icon: Icons.pending_actions,
+          text: 'Workout in progress: ${h.muscleGroup}',
+          color: Colors.orangeAccent,
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+
+  Widget _buildMuscleGroupSection(MuscleGroup? selectedGroup) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [kAccentCyan.withOpacity(0.3), kAccentBlue.withOpacity(0.3)],
+                ),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.fitness_center, color: kAccentCyan, size: 20),
+            ),
+            const SizedBox(width: 12),
+            const Text(
+              'Select Muscle Group',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: kTextWhite,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: MuscleGroup.values.map((group) {
+            final isSelected = group == selectedGroup;
+            return _buildMuscleGroupChip(group, isSelected);
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMuscleGroupChip(MuscleGroup group, bool isSelected) {
+    final historyAsync = ref.watch(todayHistoryProvider);
+    
+    return historyAsync.when(
+      data: (todayHistory) {
+        // Check if user has already completed a workout today
+        final hasCompletedToday = todayHistory != null && todayHistory.completed;
+        final isDisabled = hasCompletedToday && !isSelected;
+        
+        return Opacity(
+          opacity: isDisabled ? 0.5 : 1.0,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: isDisabled 
+                ? null 
+                : () {
+                    setState(() => _selectedGroup = group);
+                    ref.read(selectedGroupProvider.notifier).state = group;
+                  },
+              borderRadius: BorderRadius.circular(16),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                decoration: BoxDecoration(
+                  gradient: isSelected
+                      ? LinearGradient(
+                          colors: [kAccentCyan, kAccentBlue],
+                        )
+                      : null,
+                  color: isSelected 
+                      ? null 
+                      : isDisabled 
+                          ? kCardSurface.withOpacity(0.3)
+                          : kCardSurface.withOpacity(0.6),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isSelected 
+                        ? kAccentCyan 
+                        : isDisabled 
+                            ? kGlassBorder.withOpacity(0.3)
+                            : kGlassBorder,
+                    width: isSelected ? 2 : 1,
+                  ),
+                  boxShadow: isSelected
+                      ? [
+                          BoxShadow(
+                            color: kAccentCyan.withOpacity(0.4),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _getGroupIcon(group),
+                      color: isSelected ? kDarkSlate : kAccentCyan,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      group.label,
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: isSelected ? kDarkSlate : kTextWhite,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              error: (_, __) => const SizedBox.shrink(),
+            ),
+          ),
+        );
+      },
+      loading: () => Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          decoration: BoxDecoration(
+            color: kCardSurface.withOpacity(0.6),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: kGlassBorder, width: 1),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                _getGroupIcon(group),
+                color: kAccentCyan,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                group.label,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: kTextWhite,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      error: (_, __) => Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () {
+            setState(() => _selectedGroup = group);
+            ref.read(selectedGroupProvider.notifier).state = group;
+          },
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            decoration: BoxDecoration(
+              color: kCardSurface.withOpacity(0.6),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: kGlassBorder, width: 1),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  _getGroupIcon(group),
+                  color: kAccentCyan,
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  group.label,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: kTextWhite,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
       ),
     );
   }
-}
 
-class _ProfileCard extends StatelessWidget {
-  final int age;
-  final double bmi;
-  final String level;
+  IconData _getGroupIcon(MuscleGroup group) {
+    switch (group) {
+      case MuscleGroup.back:
+        return Icons.accessibility_new;
+      case MuscleGroup.chest:
+        return Icons.favorite;
+      case MuscleGroup.legs:
+        return Icons.directions_run;
+      case MuscleGroup.arms:
+        return Icons.fitness_center;
+      case MuscleGroup.cardio:
+        return Icons.favorite_border;
+      case MuscleGroup.core:
+        return Icons.sports_gymnastics;
+    }
+  }
 
-  const _ProfileCard({
-    required this.age,
-    required this.bmi,
-    required this.level,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: kCardSurface.withOpacity(0.6),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: kGlassBorder),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
+  Widget _buildExerciseList(MuscleGroup group) {
+    final asyncExercises = ref.watch(exercisesForGroupProvider);
+    return asyncExercises.when(
+      data: (exercises) {
+        if (exercises.isEmpty) {
+          return Container(
+            padding: const EdgeInsets.all(32),
             decoration: BoxDecoration(
-              color: kAccentBlue.withOpacity(0.2),
-              shape: BoxShape.circle,
+              color: kCardSurface.withOpacity(0.6),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: kGlassBorder),
             ),
-            child: const Icon(Icons.person, size: 22, color: kAccentBlue),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Center(
+              child: Column(
+                children: [
+                  Icon(Icons.search_off, size: 48, color: kTextGrey.withOpacity(0.5)),
+                  const SizedBox(height: 12),
+                  Text(
+                    'No exercises found for ${group.label}',
+                    style: TextStyle(color: kTextGrey, fontSize: 15),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  'Your Profile',
-                  style: TextStyle(
-                    color: kTextGrey.withOpacity(0.8),
-                    fontSize: 12,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Age: $age  •  BMI: ${bmi.toStringAsFixed(1)}  •  $level',
+                  '${exercises.length} Exercises',
                   style: const TextStyle(
-                    fontSize: 14,
+                    fontSize: 16,
                     fontWeight: FontWeight.bold,
                     color: kTextWhite,
                   ),
                 ),
+                Consumer(
+                  builder: (context, ref, _) {
+                    final historyAsync = ref.watch(todayHistoryProvider);
+                    return historyAsync.when(
+                      data: (todayHistory) {
+                        final hasCompletedToday = todayHistory != null && todayHistory.completed;
+                        
+                        return ElevatedButton.icon(
+                          onPressed: hasCompletedToday 
+                            ? null 
+                            : () => setState(() => _inWorkout = true),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: hasCompletedToday 
+                              ? kTextGrey.withOpacity(0.3) 
+                              : kAccentCyan,
+                            foregroundColor: kDarkSlate,
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            elevation: hasCompletedToday ? 0 : 4,
+                          ),
+                          icon: Icon(
+                            hasCompletedToday ? Icons.block : Icons.play_arrow, 
+                            size: 20,
+                          ),
+                          label: Text(
+                            hasCompletedToday ? 'Completed Today' : 'Start Workout',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
+                        );
+                      },
+                      loading: () => ElevatedButton.icon(
+                        onPressed: null,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kTextGrey.withOpacity(0.3),
+                          foregroundColor: kDarkSlate,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        icon: const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: kTextGrey),
+                        ),
+                        label: const Text(
+                          'Loading...',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                        ),
+                      ),
+                      error: (_, __) => ElevatedButton.icon(
+                        onPressed: () => setState(() => _inWorkout = true),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kAccentCyan,
+                          foregroundColor: kDarkSlate,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          elevation: 4,
+                        ),
+                        icon: const Icon(Icons.play_arrow, size: 20),
+                        label: const Text(
+                          'Start Workout',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
-          ),
-        ],
+            const SizedBox(height: 16),
+            ...exercises.map((ex) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _ExerciseCard(exercise: ex),
+                )),
+          ],
+        );
+      },
+      loading: () => Column(
+        children: List.generate(3, (i) => const Padding(
+          padding: EdgeInsets.only(bottom: 12),
+          child: _SkeletonBox(height: 120),
+        )),
+      ),
+      error: (e, _) => _InfoBanner(
+        icon: Icons.error_outline,
+        text: 'Error: ${e.toString()}',
+        color: Colors.redAccent,
       ),
     );
   }
 }
 
 class _ExerciseCard extends StatelessWidget {
-  final Exercise ex;
-  const _ExerciseCard({required this.ex});
+  final Exercise exercise;
+  const _ExerciseCard({required this.exercise});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: kCardSurface.withOpacity(0.6),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: kGlassBorder),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: Container(
-              width: 90,
-              height: 90,
-              color: Colors.black12,
-              child: ex.id.trim().isEmpty
-                  ? const Center(child: Icon(Icons.image_not_supported, color: kTextGrey))
-                  : _ExerciseGif(exerciseId: ex.id),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _prettyName(ex.name),
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    color: kTextWhite,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    _Pill('Body: ${ex.bodyPart}'),
-                    _Pill('Target: ${ex.target}'),
-                    _Pill('Equip: ${ex.equipment}'),
-                  ],
-                ),
-              ],
-            ),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            kCardSurface.withOpacity(0.8),
+            kCardSurface.withOpacity(0.6),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: kGlassBorder, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
-    );
-  }
-}
-
-class WorkoutPlayerScreen extends ConsumerWidget {
-  const WorkoutPlayerScreen({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final workout = ref.watch(workoutControllerProvider);
-    final controller = ref.read(workoutControllerProvider.notifier);
-    final cur = workout.current;
-
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [kDarkSlate, kDarkTeal],
-        ),
-      ),
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: kTextWhite),
-            onPressed: () => Navigator.pop(context),
-          ),
-          title: Text(
-            workout.isFinished
-                ? 'Completed'
-                : 'Workout (${workout.done}/${workout.total})',
-            style: const TextStyle(
-              color: kTextWhite,
-              fontWeight: FontWeight.bold,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Row(
+          children: [
+            Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.3),
+              ),
+              child: _ExerciseGif(
+                exerciseId: exercise.id,
+                fit: BoxFit.cover,
+              ),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                controller.reset();
-                Navigator.pop(context);
-              },
-              child: const Text('Reset', style: TextStyle(color: kAccentCyan)),
-            ),
-          ],
-        ),
-        body: Padding(
-          padding: const EdgeInsets.all(16),
-          child: workout.hasWorkout
-              ? (workout.isFinished
-                  ? _CompletedView(onDone: () => Navigator.pop(context))
-                  : Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _WorkoutStepView(
-                          exercise: cur!,
-                          isDone: workout.completedIds.contains(cur.id),
-                          onPrev: controller.goPrev,
-                          onNext: controller.goNext,
-                          onComplete: controller.completeCurrentAndNext,
-                        ),
-                      ],
-                    ))
-              : const Center(
-                  child: Text(
-                    'No workout started.\nGo back and press Start Workout.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontWeight: FontWeight.bold, color: kTextWhite),
-                  ),
-                ),
-        ),
-      ),
-    );
-  }
-}
-
-class _WorkoutStepView extends StatelessWidget {
-  final Exercise exercise;
-  final bool isDone;
-  final VoidCallback onPrev;
-  final VoidCallback onNext;
-  final VoidCallback onComplete;
-
-  const _WorkoutStepView({
-    required this.exercise,
-    required this.isDone,
-    required this.onPrev,
-    required this.onNext,
-    required this.onComplete,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: kCardSurface.withOpacity(0.6),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: kGlassBorder),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                _prettyName(exercise.name),
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: kTextWhite,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                height: 210,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
-                  child: _ExerciseGif(
-                    exerciseId: exercise.id, 
-                    fit: BoxFit.cover
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _Pill('Body: ${exercise.bodyPart}'),
-                  _Pill('Target: ${exercise.target}'),
-                  _Pill('Equip: ${exercise.equipment}'),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: kAccentBlue.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: kAccentBlue.withOpacity(0.2)),
-                ),
-                child: const Row(
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.info_outline, color: kAccentBlue, size: 20),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Tip: Controlled reps, full range of motion.',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: kTextGrey,
-                        ),
+                    Text(
+                      _prettyName(exercise.name),
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: kTextWhite,
+                        height: 1.3,
                       ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        _Pill(exercise.target),
+                        if (exercise.equipment.isNotEmpty)
+                          _Pill(exercise.equipment),
+                      ],
                     ),
                   ],
                 ),
               ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: onPrev,
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  side: const BorderSide(color: kGlassBorder),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  foregroundColor: kTextWhite,
-                ),
-                child: const Text('Prev'),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: OutlinedButton(
-                onPressed: onNext,
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  side: const BorderSide(color: kGlassBorder),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  foregroundColor: kTextWhite,
-                ),
-                child: const Text('Next'),
-              ),
             ),
           ],
         ),
-        const SizedBox(height: 10),
-        SizedBox(
-          width: double.infinity,
-          height: 54,
-          child: ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: isDone ? Colors.green : kAccentCyan,
-              foregroundColor: kDarkSlate,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+    );
+  }
+}
+
+// --- WORKOUT SESSION ---
+
+class _WorkoutSessionView extends ConsumerStatefulWidget {
+  final VoidCallback onDone;
+  const _WorkoutSessionView({required this.onDone});
+
+  @override
+  ConsumerState<_WorkoutSessionView> createState() => _WorkoutSessionViewState();
+}
+
+class _WorkoutSessionViewState extends ConsumerState<_WorkoutSessionView> {
+  late Timer _timer;
+  int _elapsedSeconds = 0;
+  final Set<String> _completedIds = {};
+  bool _sessionFinished = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _elapsedSeconds++);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  Future<void> _finishWorkout() async {
+    final group = ref.read(selectedGroupProvider);
+    if (group == null) return;
+
+    final history = WorkoutHistory(
+      date: _todayDateKey(),
+      completed: true,
+      durationMinutes: (_elapsedSeconds / 60).ceil(),
+      muscleGroup: group.label,
+      exerciseIds: _completedIds.toList(),
+    );
+
+    final repo = ref.read(historyRepoProvider);
+    await repo.save(history);
+    ref.invalidate(todayHistoryProvider);
+
+    if (mounted) {
+      setState(() => _sessionFinished = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_sessionFinished) {
+      return _CompletedView(onDone: widget.onDone);
+    }
+
+    final asyncExercises = ref.watch(exercisesForGroupProvider);
+    return asyncExercises.when(
+      data: (exercises) {
+        if (exercises.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error_outline, size: 60, color: kTextGrey),
+                const SizedBox(height: 16),
+                const Text(
+                  'No exercises available',
+                  style: TextStyle(color: kTextWhite, fontSize: 18),
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: widget.onDone,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kAccentCyan,
+                    foregroundColor: kDarkSlate,
+                  ),
+                  child: const Text('Go Back'),
+                ),
+              ],
             ),
-            onPressed: onComplete,
-            child: Text(
-              isDone ? 'Done ✓ (Next)' : 'Mark Done',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          );
+        }
+
+        return Column(
+          children: [
+            _buildWorkoutHeader(exercises.length),
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.all(20),
+                itemCount: exercises.length,
+                itemBuilder: (context, i) {
+                  final ex = exercises[i];
+                  final isDone = _completedIds.contains(ex.id);
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: _WorkoutExerciseCard(
+                      exercise: ex,
+                      isDone: isDone,
+                      onToggle: () {
+                        setState(() {
+                          if (isDone) {
+                            _completedIds.remove(ex.id);
+                          } else {
+                            _completedIds.add(ex.id);
+                          }
+                        });
+                      },
+                    ),
+                  );
+                },
+              ),
+            ),
+            _buildBottomActions(),
+          ],
+        );
+      },
+      loading: () => const Center(child: CircularProgressIndicator(color: kAccentCyan)),
+      error: (e, _) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: _InfoBanner(
+            icon: Icons.error_outline,
+            text: 'Error: ${e.toString()}',
+            color: Colors.redAccent,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWorkoutHeader(int totalExercises) {
+    final minutes = _elapsedSeconds ~/ 60;
+    final seconds = _elapsedSeconds % 60;
+    final timeStr = '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            kCardSurface.withOpacity(0.95),
+            kCardSurface.withOpacity(0.8),
+          ],
+        ),
+        border: const Border(
+          bottom: BorderSide(color: kGlassBorder, width: 1),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.close, color: kTextWhite),
+                  onPressed: widget.onDone,
+                ),
+                const Text(
+                  'Workout Session',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: kTextWhite,
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: kAccentCyan.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: kAccentCyan.withOpacity(0.5)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.timer, color: kAccentCyan, size: 16),
+                      const SizedBox(width: 6),
+                      Text(
+                        timeStr,
+                        style: const TextStyle(
+                          color: kAccentCyan,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _WorkoutProgress(done: _completedIds.length, total: totalExercises),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomActions() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.bottomCenter,
+          end: Alignment.topCenter,
+          colors: [
+            kCardSurface.withOpacity(0.95),
+            kCardSurface.withOpacity(0.8),
+          ],
+        ),
+        border: const Border(
+          top: BorderSide(color: kGlassBorder, width: 1),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 8,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            // Requirement hint
+            if (_completedIds.length < 3 || _completedIds.length > 6)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  _completedIds.length < 3
+                      ? 'Complete at least 3 exercises (${_completedIds.length}/3)'
+                      : 'Maximum 6 exercises allowed (${_completedIds.length}/6)',
+                  style: TextStyle(
+                    color: _completedIds.length > 6 ? Colors.orange : kTextGrey,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: widget.onDone,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: kTextWhite,
+                      side: const BorderSide(color: kGlassBorder, width: 1.5),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton(
+                    onPressed: (_completedIds.length < 3 || _completedIds.length > 6) ? null : _finishWorkout,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: (_completedIds.length < 3 || _completedIds.length > 6)
+                          ? kTextGrey.withOpacity(0.3)
+                          : kAccentCyan,
+                      foregroundColor: kDarkSlate,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      elevation: (_completedIds.length < 3 || _completedIds.length > 6) ? 0 : 4,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        Icon(Icons.check_circle, size: 20),
+                        SizedBox(width: 8),
+                        Text(
+                          'Finish Workout',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkoutExerciseCard extends StatelessWidget {
+  final Exercise exercise;
+  final bool isDone;
+  final VoidCallback onToggle;
+
+  const _WorkoutExerciseCard({
+    required this.exercise,
+    required this.isDone,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onToggle,
+        borderRadius: BorderRadius.circular(16),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDone
+                  ? [
+                      Colors.green.withOpacity(0.3),
+                      Colors.green.withOpacity(0.2),
+                    ]
+                  : [
+                      kCardSurface.withOpacity(0.8),
+                      kCardSurface.withOpacity(0.6),
+                    ],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isDone ? Colors.greenAccent.withOpacity(0.5) : kGlassBorder,
+              width: isDone ? 2 : 1,
+            ),
+            boxShadow: isDone
+                ? [
+                    BoxShadow(
+                      color: Colors.greenAccent.withOpacity(0.2),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
+                : null,
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Row(
+              children: [
+                Container(
+                  width: 110,
+                  height: 110,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.3),
+                  ),
+                  child: _ExerciseGif(
+                    exerciseId: exercise.id,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _prettyName(exercise.name),
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: isDone ? Colors.greenAccent : kTextWhite,
+                                  height: 1.3,
+                                  decoration: isDone ? TextDecoration.lineThrough : null,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              padding: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: isDone
+                                    ? Colors.greenAccent.withOpacity(0.3)
+                                    : Colors.transparent,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: isDone ? Colors.greenAccent : kTextGrey,
+                                  width: 2,
+                                ),
+                              ),
+                              child: Icon(
+                                isDone ? Icons.check : Icons.circle_outlined,
+                                color: isDone ? Colors.greenAccent : kTextGrey,
+                                size: 20,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            _Pill(exercise.target),
+                            if (exercise.equipment.isNotEmpty)
+                              _Pill(exercise.equipment),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
-      ],
+      ),
     );
   }
 }
@@ -1186,33 +1576,79 @@ class _CompletedView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Container(
-        padding: const EdgeInsets.all(24),
+        margin: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(32),
         decoration: BoxDecoration(
-          color: kCardSurface.withOpacity(0.8),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: kGlassBorder),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              kCardSurface.withOpacity(0.9),
+              kCardSurface.withOpacity(0.7),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: kAccentCyan.withOpacity(0.5), width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: kAccentCyan.withOpacity(0.3),
+              blurRadius: 24,
+              offset: const Offset(0, 8),
+            ),
+          ],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.celebration, size: 50, color: kAccentCyan),
-            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [kAccentCyan.withOpacity(0.3), kAccentBlue.withOpacity(0.3)],
+                ),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.celebration, size: 64, color: kAccentCyan),
+            ),
+            const SizedBox(height: 24),
             const Text(
               'Workout Completed!',
               style: TextStyle(
-                fontSize: 20,
+                fontSize: 24,
                 fontWeight: FontWeight.bold,
                 color: kTextWhite,
+                letterSpacing: 0.5,
               ),
+              textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: kAccentCyan,
-                foregroundColor: kDarkSlate,
+            const SizedBox(height: 12),
+            Text(
+              'Great job! Keep up the momentum.',
+              style: TextStyle(
+                fontSize: 15,
+                color: kTextGrey,
               ),
-              onPressed: onDone,
-              child: const Text('Back'),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 32),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kAccentCyan,
+                  foregroundColor: kDarkSlate,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  elevation: 4,
+                ),
+                onPressed: onDone,
+                child: const Text(
+                  'Back to Home',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+              ),
             ),
           ],
         ),
@@ -1230,15 +1666,25 @@ class _Pill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: kAccentCyan.withOpacity(0.15),
+        gradient: LinearGradient(
+          colors: [
+            kAccentCyan.withOpacity(0.2),
+            kAccentBlue.withOpacity(0.15),
+          ],
+        ),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: kAccentCyan.withOpacity(0.3)),
+        border: Border.all(color: kAccentCyan.withOpacity(0.4)),
       ),
       child: Text(
         text,
-        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kAccentCyan),
+        style: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          color: kAccentCyan,
+          letterSpacing: 0.3,
+        ),
       ),
     );
   }
@@ -1253,29 +1699,72 @@ class _WorkoutProgress extends StatelessWidget {
   Widget build(BuildContext context) {
     final progress = total == 0 ? 0.0 : (done / total).clamp(0.0, 1.0);
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: kCardSurface.withOpacity(0.6),
+        gradient: LinearGradient(
+          colors: [
+            kCardSurface.withOpacity(0.7),
+            kCardSurface.withOpacity(0.5),
+          ],
+        ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: kGlassBorder),
+        border: Border.all(color: kGlassBorder, width: 1),
       ),
-      child: Row(
+      child: Column(
         children: [
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(99),
-              child: LinearProgressIndicator(
-                value: progress,
-                minHeight: 10,
-                backgroundColor: Colors.white.withOpacity(0.1),
-                valueColor: const AlwaysStoppedAnimation(kAccentCyan),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Progress',
+                style: TextStyle(
+                  color: kTextGrey,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
+              Text(
+                '$done/$total completed',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: kTextWhite,
+                  fontSize: 14,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 10),
-          Text(
-            '$done/$total',
-            style: const TextStyle(fontWeight: FontWeight.bold, color: kTextWhite),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(99),
+            child: Stack(
+              children: [
+                Container(
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+                FractionallySizedBox(
+                  widthFactor: progress,
+                  child: Container(
+                    height: 12,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [kAccentCyan, kAccentBlue],
+                      ),
+                      borderRadius: BorderRadius.circular(99),
+                      boxShadow: [
+                        BoxShadow(
+                          color: kAccentCyan.withOpacity(0.5),
+                          blurRadius: 8,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1301,23 +1790,48 @@ class _InfoBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
+        gradient: LinearGradient(
+          colors: [
+            color.withOpacity(0.2),
+            color.withOpacity(0.1),
+          ],
+        ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withOpacity(0.4), width: 1.5),
       ),
       child: Row(
         children: [
-          Icon(icon, color: color),
-          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.2),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: color, size: 20),
+          ),
+          const SizedBox(width: 12),
           Expanded(
-            child: Text(text, style: TextStyle(fontWeight: FontWeight.bold, color: color)),
+            child: Text(
+              text,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: color,
+                fontSize: 14,
+              ),
+            ),
           ),
           if (actionText != null && onAction != null)
             TextButton(
               onPressed: onAction,
-              child: Text(actionText!, style: TextStyle(color: color)),
+              child: Text(
+                actionText!,
+                style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
         ],
       ),
@@ -1325,7 +1839,6 @@ class _InfoBanner extends StatelessWidget {
   }
 }
 
-// ✅ FIXED FLICKERING: Converted to StatefulWidget to cache Future
 class _ExerciseGif extends StatefulWidget {
   final String exerciseId;
   final BoxFit fit;
@@ -1341,7 +1854,6 @@ class _ExerciseGifState extends State<_ExerciseGif> {
   @override
   void initState() {
     super.initState();
-    // Cache the future here so it doesn't recreate on rebuilds
     _future = ExerciseService.fetchExerciseGifBytes(
       exerciseId: widget.exerciseId,
       resolutionPx: 180,
@@ -1376,7 +1888,7 @@ class _ExerciseGifState extends State<_ExerciseGif> {
           return Container(
             color: Colors.black12,
             alignment: Alignment.center,
-            child: const CircularProgressIndicator(color: kAccentCyan),
+            child: const CircularProgressIndicator(color: kAccentCyan, strokeWidth: 2),
           );
         }
 
@@ -1390,7 +1902,7 @@ class _ExerciseGifState extends State<_ExerciseGif> {
               children: [
                 Icon(Icons.broken_image, color: kTextGrey, size: 32),
                 SizedBox(height: 4),
-                Text('No Preview', style: TextStyle(color: kTextGrey)),
+                Text('No Preview', style: TextStyle(color: kTextGrey, fontSize: 11)),
               ],
             ),
           );
@@ -1410,7 +1922,7 @@ class _ExerciseGifState extends State<_ExerciseGif> {
                 children: [
                   Icon(Icons.broken_image, color: kTextGrey, size: 32),
                   SizedBox(height: 4),
-                  Text('No Preview', style: TextStyle(color: kTextGrey)),
+                  Text('No Preview', style: TextStyle(color: kTextGrey, fontSize: 11)),
                 ],
               ),
             );
@@ -1431,14 +1943,23 @@ class _SkeletonBox extends StatelessWidget {
       height: height,
       width: double.infinity,
       decoration: BoxDecoration(
-        color: kCardSurface.withOpacity(0.6),
+        gradient: LinearGradient(
+          colors: [
+            kCardSurface.withOpacity(0.7),
+            kCardSurface.withOpacity(0.5),
+          ],
+        ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: kGlassBorder),
       ),
       child: Center(
-        child: LinearProgressIndicator(
-          minHeight: 3,
-          color: kAccentCyan.withOpacity(0.5),
+        child: SizedBox(
+          width: 200,
+          child: LinearProgressIndicator(
+            minHeight: 3,
+            backgroundColor: Colors.transparent,
+            valueColor: AlwaysStoppedAnimation(kAccentCyan.withOpacity(0.5)),
+          ),
         ),
       ),
     );

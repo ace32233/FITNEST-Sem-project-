@@ -165,21 +165,6 @@ class NotificationService {
             UILocalNotificationDateInterpretation.absoluteTime,
         matchDateTimeComponents: DateTimeComponents.time, // ✅ daily repeat
       );
-    } catch (e) {
-      debugPrint('⚠️ Falling back to inexact schedule due to: $e');
-      // Fallback for devices where exact alarm permission is missing
-      await _notifications.zonedSchedule(
-        baseId,
-        title,
-        body,
-        scheduledDate,
-        _details(body),
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: DateTimeComponents.time,
-      );
-    }
 
       debugPrint(
         '✅ Scheduled DAILY id=$baseId at $hour:${minute.toString().padLeft(2, '0')} -> '

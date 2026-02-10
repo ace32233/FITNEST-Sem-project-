@@ -1,7 +1,10 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- ✅ STEP COUNTER PERMISSIONS -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" /><!-- ⚠️ YOU WERE MISSING THIS -->
 
     <!-- Notifications -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -9,7 +12,6 @@
 
     <!-- Alarm / scheduling -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <!-- Some devices/targets require this for exact alarms -->
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
     <!-- Needed to re-register alarms after reboot/update -->
@@ -48,12 +50,31 @@
             </intent-filter>
         </activity>
 
-        <!-- ✅ MUST NOT be exported -->
+        <!-- ✅ STEP COUNTER FOREGROUND SERVICE - YOU WERE MISSING THIS ENTIRE SECTION -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="health"
+            android:exported="false"
+            android:stopWithTask="false" />
+
+        <!-- ✅ STEP COUNTER BOOT RECEIVER - FIXED CONFLICT WITH tools:replace -->
+        <receiver
+            android:name="com.pravera.flutter_foreground_task.service.RestartReceiver"
+            android:enabled="true"
+            android:exported="false"
+            tools:replace="android:exported">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- ✅ Notification receivers (your existing ones) -->
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
             android:exported="false" />
 
-        <!-- ✅ MUST NOT be exported -->
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
             android:exported="false">

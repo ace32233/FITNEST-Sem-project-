@@ -14,6 +14,7 @@ import 'calorie_page.dart';
 import 'water_reminder.dart'; 
 import 'personalized_exercise_screen.dart'; 
 import 'services/user_goals_service.dart';
+import 'services/step_service.dart'; // ✅ Added
 import 'profile_page.dart'; 
 
 // --- GLOSSY DESIGN CONSTANTS ---
@@ -132,6 +133,11 @@ class _HomePageState extends State<HomePage> {
   late int _carbsGoal;
   late int _currentStreak;
 
+  // ✅ Step counter state
+  int _currentSteps = 0;
+  int _stepsGoal = 10000;
+  Timer? _stepRefreshTimer;
+
   @override
   void initState() {
     super.initState();
@@ -151,6 +157,61 @@ class _HomePageState extends State<HomePage> {
     if (widget.initialData == null) {
       _refreshData(); 
     }
+
+    // ✅ Load step goal and start monitoring
+    _loadStepGoal();
+    _startStepMonitoring();
+  }
+
+  @override
+  void dispose() {
+    _stepRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  // ✅ Load step goal from SharedPreferences
+  Future<void> _loadStepGoal() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      setState(() {
+        _stepsGoal = prefs.getInt('steps_goal') ?? 10000;
+      });
+    } catch (e) {
+      debugPrint('Error loading step goal: $e');
+    }
+  }
+
+  // ✅ Save step goal to SharedPreferences
+  Future<void> _saveStepGoal(int goal) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('steps_goal', goal);
+      setState(() {
+        _stepsGoal = goal;
+      });
+    } catch (e) {
+      debugPrint('Error saving step goal: $e');
+    }
+  }
+
+  // ✅ Start monitoring steps from the service
+  void _startStepMonitoring() {
+    // Update immediately
+    _updateSteps();
+    
+    // Refresh every 2 seconds to keep UI updated
+    _stepRefreshTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (mounted) {
+        _updateSteps();
+      }
+    });
+  }
+
+  // ✅ Update steps from the service
+  void _updateSteps() {
+    setState(() {
+      _currentSteps = StepService.instance.todaySteps;
+    });
   }
 
   void _onItemTapped(int index) {
@@ -160,6 +221,7 @@ class _HomePageState extends State<HomePage> {
     // Refresh when switching back to Home to catch any goal updates
     if (index == 0) {
       _refreshData();
+      _updateSteps(); // ✅ Also refresh steps
     }
   }
 
@@ -197,6 +259,52 @@ class _HomePageState extends State<HomePage> {
     _refreshData(); // Refresh to sync goals/streak if needed
   }
 
+  // ✅ Show dialog to edit step goal
+  void _showEditStepGoalDialog() {
+    final controller = TextEditingController(text: _stepsGoal.toString());
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: kCardSurface,
+        title: const Text('Edit Step Goal', style: TextStyle(color: kTextWhite)),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          style: const TextStyle(color: kTextWhite),
+          decoration: InputDecoration(
+            hintText: 'Enter step goal',
+            hintStyle: TextStyle(color: kTextGrey.withOpacity(0.5)),
+            enabledBorder: OutlineInputBorder(
+              borderSide: BorderSide(color: kGlassBorder),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderSide: const BorderSide(color: kAccentCyan),
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: kTextGrey)),
+          ),
+          TextButton(
+            onPressed: () {
+              final newGoal = int.tryParse(controller.text);
+              if (newGoal != null && newGoal > 0) {
+                _saveStepGoal(newGoal);
+                Navigator.pop(context);
+              }
+            },
+            child: const Text('Save', style: TextStyle(color: kAccentCyan)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final List<Widget> pages = [
@@ -212,7 +320,11 @@ class _HomePageState extends State<HomePage> {
         carbsGoal: _carbsGoal,
         fat: _fatConsumed,
         fatGoal: _fatGoal,
-        streak: _currentStreak, 
+        streak: _currentStreak,
+        // ✅ Pass step data
+        steps: _currentSteps,
+        stepsGoal: _stepsGoal,
+        onEditStepGoal: _showEditStepGoalDialog,
       ),
       NutritionPage(onDataChanged: _updateNutrition),
       // ✅ FIX: Pass the refresh callback to update streak instantly
@@ -238,25 +350,37 @@ class _HomePageState extends State<HomePage> {
         bottomNavigationBar: SafeArea(
           child: Container(
             height: 75,
-            margin: const EdgeInsets.fromLTRB(10, 0, 10, 20),
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: kDarkSlate.withOpacity(0.95),
-              borderRadius: BorderRadius.circular(25),
-              border: Border.all(color: kGlassBorder, width: 0.5),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 20, offset: const Offset(0, 10))],
+              color: kCardSurface.withOpacity(0.9),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: kGlassBorder, width: 1.5),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4)),
+              ],
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(25),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _buildNavItem(0, Icons.home_rounded, "Home"),
-                    _buildNavItem(1, Icons.restaurant_menu_rounded, "Food"),
-                    _buildNavItem(2, Icons.fitness_center_rounded, "Workout"),
-                    _buildNavItem(3, Icons.water_drop_rounded, "Water"),
-                    _buildNavItem(4, Icons.person_rounded, "Profile"),
+              borderRadius: BorderRadius.circular(28),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                child: BottomNavigationBar(
+                  backgroundColor: Colors.transparent,
+                  elevation: 0,
+                  type: BottomNavigationBarType.fixed,
+                  currentIndex: _selectedIndex,
+                  onTap: _onItemTapped,
+                  selectedItemColor: kAccentCyan,
+                  unselectedItemColor: kTextGrey.withOpacity(0.6),
+                  selectedFontSize: 12,
+                  unselectedFontSize: 11,
+                  showSelectedLabels: true,
+                  showUnselectedLabels: false,
+                  items: const [
+                    BottomNavigationBarItem(icon: Icon(Icons.home_rounded, size: 26), label: 'Home'),
+                    BottomNavigationBarItem(icon: Icon(Icons.restaurant_menu_rounded, size: 26), label: 'Nutrition'),
+                    BottomNavigationBarItem(icon: Icon(Icons.fitness_center_rounded, size: 26), label: 'Exercise'),
+                    BottomNavigationBarItem(icon: Icon(Icons.water_drop_rounded, size: 26), label: 'Water'),
+                    BottomNavigationBarItem(icon: Icon(Icons.person_rounded, size: 26), label: 'Profile'),
                   ],
                 ),
               ),
@@ -266,37 +390,12 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
-
-  Widget _buildNavItem(int index, IconData icon, String label) {
-    bool isActive = _selectedIndex == index;
-    return InkWell(
-      onTap: () => _onItemTapped(index),
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: isActive ? BoxDecoration(
-          color: kAccentCyan.withOpacity(0.15),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: kAccentCyan.withOpacity(0.2)),
-        ) : null,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 24, color: isActive ? kAccentCyan : kTextGrey.withOpacity(0.7)),
-            const SizedBox(height: 4),
-            Text(label, style: TextStyle(fontSize: 10, fontWeight: isActive ? FontWeight.bold : FontWeight.normal, color: isActive ? kAccentCyan : kTextGrey.withOpacity(0.7))),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 // ==========================================
-// 2. THE DASHBOARD (UPDATED)
+// 2. HOME DASHBOARD (UI ONLY)
 // ==========================================
-class HomeDashboard extends StatefulWidget {
+class HomeDashboard extends StatelessWidget {
   final Function(int) onNavigate;
   final int waterIntake;
   final int waterGoal;
@@ -309,6 +408,10 @@ class HomeDashboard extends StatefulWidget {
   final int fat;
   final int fatGoal;
   final int streak;
+  // ✅ Step counter props
+  final int steps;
+  final int stepsGoal;
+  final VoidCallback onEditStepGoal;
 
   const HomeDashboard({
     super.key,
@@ -324,194 +427,145 @@ class HomeDashboard extends StatefulWidget {
     required this.fat,
     required this.fatGoal,
     required this.streak,
+    required this.steps,
+    required this.stepsGoal,
+    required this.onEditStepGoal,
   });
 
   @override
-  State<HomeDashboard> createState() => _HomeDashboardState();
-}
-
-class _HomeDashboardState extends State<HomeDashboard> {
-  int _steps = 0; 
-  int _stepGoal = 10000;
-  late StreamSubscription<StepCount> _stepCountSubscription;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadLocalSettings();
-    _initPedometer();
-  }
-
-  Future<void> _loadLocalSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    if(mounted) setState(() => _stepGoal = prefs.getInt('daily_step_goal') ?? 10000);
-  }
-
-  Future<void> _initPedometer() async {
-    if (await Permission.activityRecognition.request().isGranted) {
-      _stepCountSubscription = Pedometer.stepCountStream.listen(_onStepCount, onError: (e) {});
-    }
-  }
-
-  void _onStepCount(StepCount event) async {
-    final prefs = await SharedPreferences.getInstance();
-    final todayKey = "${DateTime.now().year}-${DateTime.now().month}-${DateTime.now().day}";
-    int? baseline = prefs.getInt('steps_at_midnight_$todayKey');
-    if (baseline == null) {
-      baseline = event.steps;
-      await prefs.setInt('steps_at_midnight_$todayKey', event.steps);
-    }
-    int todaySteps = event.steps - baseline;
-    if (todaySteps < 0) { todaySteps = event.steps; await prefs.setInt('steps_at_midnight_$todayKey', 0); }
-    if (mounted) setState(() => _steps = todaySteps);
-  }
-
-  @override
-  void dispose() {
-    try { _stepCountSubscription.cancel(); } catch(e){}
-    super.dispose();
-  }
-
-  String getGreeting() {
-    final hour = DateTime.now().hour;
-    if (hour < 12) return "Good Morning";
-    if (hour < 17) return "Good Afternoon";
-    return "Good Evening";
-  }
-
-  void _showStepGoalDialog() {
-    final controller = TextEditingController(text: _stepGoal.toString());
-    showDialog(
-      context: context,
-      builder: (context) => ClipRRect(
-        borderRadius: BorderRadius.circular(25),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: AlertDialog(
-            backgroundColor: kCardSurface.withOpacity(0.95),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25), side: const BorderSide(color: kGlassBorder)),
-            title: const Text('Set Daily Step Goal', style: TextStyle(color: kTextWhite)),
-            content: TextField(controller: controller, keyboardType: TextInputType.number, style: const TextStyle(color: kTextWhite), decoration: InputDecoration(filled: true, fillColor: Colors.white.withOpacity(0.05))),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: kTextGrey))),
-              ElevatedButton(onPressed: () async {
-                final newGoal = int.tryParse(controller.text) ?? 10000;
-                final prefs = await SharedPreferences.getInstance();
-                await prefs.setInt('daily_step_goal', newGoal);
-                setState(() => _stepGoal = newGoal);
-                if(mounted) Navigator.pop(context);
-              }, style: ElevatedButton.styleFrom(backgroundColor: kAccentCyan, foregroundColor: kDarkSlate), child: const Text('Save')),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        toolbarHeight: 80,
-        title: Padding(
-          padding: const EdgeInsets.only(left: 8.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(getGreeting(), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: kTextWhite, letterSpacing: -0.5)),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Icon(Icons.local_fire_department_rounded, size: 16, color: widget.streak > 0 ? Colors.orange : kTextGrey),
-                  const SizedBox(width: 4),
-                  Text(widget.streak > 0 ? "${widget.streak} Day Streak" : "Start your streak!", style: TextStyle(fontSize: 14, color: widget.streak > 0 ? kTextWhite : kTextGrey, fontWeight: FontWeight.w500)),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-      body: SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            GlossyCalorieCard(
-              consumed: widget.calories,
-              goal: widget.caloriesGoal,
-              protein: widget.protein,
-              proteinGoal: widget.proteinGoal,
-              fat: widget.fat,
-              fatGoal: widget.fatGoal,
-              carbs: widget.carbs,
-              carbsGoal: widget.carbsGoal,
-              onTap: () => widget.onNavigate(1), 
+            const SizedBox(height: 8),
+            _buildGreeting(),
+            const SizedBox(height: 12),
+            _buildStreakBanner(),
+            const SizedBox(height: 24),
+            GlossyNutritionCard(
+              calories: calories,
+              caloriesGoal: caloriesGoal,
+              protein: protein,
+              proteinGoal: proteinGoal,
+              carbs: carbs,
+              carbsGoal: carbsGoal,
+              fat: fat,
+              fatGoal: fatGoal,
+              onTap: () => onNavigate(1),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             GlossyWaterCard(
-              consumed: widget.waterIntake,
-              goal: widget.waterGoal,
-              onTap: () => widget.onNavigate(3), 
+              consumed: waterIntake,
+              goal: waterGoal,
+              onTap: () => onNavigate(3),
+            ),
+            const SizedBox(height: 16),
+            // ✅ Updated step card with real data
+            GlossyStepsCard(
+              steps: steps,
+              goal: stepsGoal,
+              onEdit: onEditStepGoal,
             ),
             const SizedBox(height: 20),
-            GlossyStepsCard(steps: _steps, goal: _stepGoal, onEdit: _showStepGoalDialog),
-            const SizedBox(height: 120),
           ],
         ),
       ),
     );
   }
+
+  Widget _buildGreeting() {
+    final hour = DateTime.now().hour;
+    String greeting = hour < 12
+        ? "Good Morning"
+        : hour < 17
+            ? "Good Afternoon"
+            : "Good Evening";
+    return Text(
+      greeting,
+      style: const TextStyle(
+        fontSize: 28,
+        fontWeight: FontWeight.bold,
+        color: kTextWhite,
+        letterSpacing: 0.5,
+      ),
+    );
+  }
+
+  Widget _buildStreakBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [kAccentCyan.withOpacity(0.2), kAccentBlue.withOpacity(0.2)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: kAccentCyan.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.local_fire_department_rounded, color: Colors.orange, size: 32),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("Current Streak", style: TextStyle(color: kTextGrey, fontSize: 12, fontWeight: FontWeight.w500)),
+                const SizedBox(height: 2),
+                Text(
+                  "$streak ${streak == 1 ? 'day' : 'days'}",
+                  style: const TextStyle(color: kTextWhite, fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-// --- WIDGETS ---
+// ... (Rest of the file remains exactly the same as your original)
+// Including GlossyNutritionCard, GlossyWaterCard, GlossyStepsCard classes
 
-class GlossyCalorieCard extends StatelessWidget {
-  final int consumed;
-  final int goal;
+class GlossyNutritionCard extends StatelessWidget {
+  final int calories;
+  final int caloriesGoal;
   final int protein;
   final int proteinGoal;
-  final int fat;
-  final int fatGoal;
   final int carbs;
   final int carbsGoal;
+  final int fat;
+  final int fatGoal;
   final VoidCallback onTap;
 
-  const GlossyCalorieCard({
+  const GlossyNutritionCard({
     super.key,
-    required this.consumed,
-    required this.goal,
+    required this.calories,
+    required this.caloriesGoal,
     required this.protein,
     required this.proteinGoal,
-    required this.fat,
-    required this.fatGoal,
     required this.carbs,
     required this.carbsGoal,
+    required this.fat,
+    required this.fatGoal,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final double progress = goal > 0 ? (consumed / goal).clamp(0.0, 1.0) : 0.0;
-    final int remaining = goal - consumed;
-
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
           color: kCardSurface.withOpacity(0.6),
-          borderRadius: BorderRadius.circular(32),
+          borderRadius: BorderRadius.circular(24),
           border: Border.all(color: kGlassBorder),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.25),
-              blurRadius: 25,
-              offset: const Offset(0, 10),
-            ),
-          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -522,119 +576,79 @@ class GlossyCalorieCard extends StatelessWidget {
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(8),
+                      padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: Colors.orangeAccent.withOpacity(0.2),
+                        color: Colors.green.withOpacity(0.2),
                         shape: BoxShape.circle,
+                        border: Border.all(color: Colors.greenAccent.withOpacity(0.3)),
                       ),
-                      child: const Icon(Icons.local_fire_department_rounded,
-                          color: Colors.orangeAccent, size: 20),
+                      child: const Icon(Icons.local_dining_rounded, color: Colors.greenAccent, size: 20),
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 12),
                     const Text(
-                      "Calories",
-                      style: TextStyle(
-                        color: kTextWhite,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      "Nutrition",
+                      style: TextStyle(color: kTextWhite, fontSize: 18, fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),
-                const Icon(Icons.arrow_forward_ios_rounded,
-                    color: kTextGrey, size: 16),
+                const Icon(Icons.arrow_forward_ios_rounded, color: kTextGrey, size: 16),
               ],
             ),
-            const SizedBox(height: 24),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  remaining >= 0 ? "$remaining" : "0",
-                  style: const TextStyle(
-                    fontSize: 48,
-                    fontWeight: FontWeight.bold,
-                    color: kTextWhite,
-                    height: 1.0,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const Padding(
-                  padding: EdgeInsets.only(bottom: 8.0),
-                  child: Text(
-                    "kcal left",
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: kTextGrey,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Stack(
-              children: [
-                Container(
-                  height: 24,
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.3),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    return Container(
-                      height: 24,
-                      width: constraints.maxWidth * progress,
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [kAccentCyan, kAccentBlue],
-                          begin: Alignment.centerLeft,
-                          end: Alignment.centerRight,
-                        ),
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: kAccentCyan.withOpacity(0.4),
-                            blurRadius: 10,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.green.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.greenAccent.withOpacity(0.2)),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        "Calories",
+                        style: TextStyle(color: kTextGrey, fontSize: 14, fontWeight: FontWeight.w500),
                       ),
-                    );
-                  },
-                ),
-                Positioned.fill(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          "${(progress * 100).toInt()}%",
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            shadows: [Shadow(color: Colors.black45, blurRadius: 2)],
-                          ),
+                      RichText(
+                        text: TextSpan(
+                          children: [
+                            TextSpan(
+                              text: "$calories",
+                              style: const TextStyle(color: kTextWhite, fontSize: 20, fontWeight: FontWeight.bold),
+                            ),
+                            TextSpan(
+                              text: " / $caloriesGoal kcal",
+                              style: TextStyle(color: kTextGrey.withOpacity(0.7), fontSize: 14),
+                            ),
+                          ],
                         ),
-                        Text(
-                          "$consumed / $goal",
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            shadows: [Shadow(color: Colors.black45, blurRadius: 2)],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: FractionallySizedBox(
+                      alignment: Alignment.centerLeft,
+                      widthFactor: (caloriesGoal > 0 ? calories / caloriesGoal : 0.0).clamp(0.0, 1.0),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [Colors.green, Colors.greenAccent],
                           ),
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                      ],
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(height: 24),
             const Divider(color: kGlassBorder, height: 1),
