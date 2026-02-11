@@ -14,7 +14,7 @@ import 'calorie_page.dart';
 import 'water_reminder.dart'; 
 import 'personalized_exercise_screen.dart'; 
 import 'services/user_goals_service.dart';
-import 'services/step_service.dart'; // ✅ Added
+import 'services/step_service.dart';
 import 'profile_page.dart'; 
 
 // --- GLOSSY DESIGN CONSTANTS ---
@@ -40,6 +40,8 @@ class DashboardData {
   final int fat;
   final int fatGoal;
   final int streak;
+  final int stepsCount;
+  final int stepsGoal;
 
   DashboardData({
     this.waterIntake = 0,
@@ -53,6 +55,8 @@ class DashboardData {
     this.fat = 0,
     this.fatGoal = 70,
     this.streak = 0,
+    this.stepsCount = 0,
+    this.stepsGoal = 10000,
   });
 }
 
@@ -105,6 +109,8 @@ class HomePage extends StatefulWidget {
         fat: fat.toInt(),
         fatGoal: (goals?['fat_goal_g'] ?? 70).toInt(),
         streak: (streakRes?['current_streak'] ?? 0).toInt(),
+        stepsCount: (activity?['steps_count'] ?? 0).toInt(),
+        stepsGoal: (activity?['steps_goal'] ?? 10000).toInt(),
       );
     } catch (e) {
       debugPrint("Error pre-loading data: $e");
@@ -138,6 +144,9 @@ class _HomePageState extends State<HomePage> {
   int _stepsGoal = 10000;
   Timer? _stepRefreshTimer;
 
+  // ✅ Keep pages alive
+  late final List<Widget> _pages;
+
   @override
   void initState() {
     super.initState();
@@ -153,6 +162,17 @@ class _HomePageState extends State<HomePage> {
     _carbsConsumed = data.carbs;
     _carbsGoal = data.carbsGoal;
     _currentStreak = data.streak;
+    _currentSteps = data.stepsCount;
+    _stepsGoal = data.stepsGoal;
+
+    // ✅ Initialize persistent pages once (excluding home page which rebuilds with state)
+    _pages = [
+      Container(), // Placeholder, will be replaced in build
+      NutritionPage(),
+      WaterTrackerPage(),
+      const PersonalizedExerciseScreen(),
+      const ProfilePage(),
+    ];
 
     if (widget.initialData == null) {
       _refreshData(); 
@@ -169,40 +189,87 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
-  // ✅ Load step goal from SharedPreferences
+  // ✅ Load step goal from database
   Future<void> _loadStepGoal() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      setState(() {
-        _stepsGoal = prefs.getInt('steps_goal') ?? 10000;
-      });
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) return;
+
+      final today = DateTime.now().toIso8601String().split('T')[0];
+      final activity = await _supabase
+          .from('daily_activities')
+          .select('steps_goal')
+          .eq('user_id', userId)
+          .eq('activity_date', today)
+          .maybeSingle();
+
+      if (activity != null) {
+        setState(() {
+          _stepsGoal = (activity['steps_goal'] ?? 10000).toInt();
+        });
+      } else {
+        // Create today's activity record if it doesn't exist
+        await _createTodayActivity();
+      }
     } catch (e) {
       debugPrint('Error loading step goal: $e');
     }
   }
 
-  // ✅ Save step goal to SharedPreferences
+  // ✅ Create today's activity record
+  Future<void> _createTodayActivity() async {
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) return;
+
+      final today = DateTime.now().toIso8601String().split('T')[0];
+      
+      await _supabase.from('daily_activities').insert({
+        'user_id': userId,
+        'activity_date': today,
+        'steps_count': 0,
+        'steps_goal': _stepsGoal,
+      });
+    } catch (e) {
+      debugPrint('Error creating today activity: $e');
+    }
+  }
+
+  // ✅ Save step goal to database
   Future<void> _saveStepGoal(int goal) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('steps_goal', goal);
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) return;
+
+      final today = DateTime.now().toIso8601String().split('T')[0];
+
       setState(() {
         _stepsGoal = goal;
       });
+
+      // Update in database
+      await _supabase.from('daily_activities').upsert({
+        'user_id': userId,
+        'activity_date': today,
+        'steps_goal': goal,
+        'updated_at': DateTime.now().toIso8601String(),
+      }, onConflict: 'user_id,activity_date');
+
     } catch (e) {
       debugPrint('Error saving step goal: $e');
     }
   }
 
-  // ✅ Start monitoring steps from the service
+  // ✅ Start monitoring steps from the service and save to database
   void _startStepMonitoring() {
     // Update immediately
     _updateSteps();
     
-    // Refresh every 2 seconds to keep UI updated
-    _stepRefreshTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+    // Refresh every 5 seconds to keep UI updated and save to database
+    _stepRefreshTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
       if (mounted) {
         _updateSteps();
+        await _saveStepsToDatabase();
       }
     });
   }
@@ -214,6 +281,28 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  // ✅ Save steps to database
+  Future<void> _saveStepsToDatabase() async {
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) return;
+
+      final today = DateTime.now().toIso8601String().split('T')[0];
+
+      // Upsert the step count (StepService handles midnight reset automatically)
+      await _supabase.from('daily_activities').upsert({
+        'user_id': userId,
+        'activity_date': today,
+        'steps_count': _currentSteps,
+        'steps_goal': _stepsGoal,
+        'updated_at': DateTime.now().toIso8601String(),
+      }, onConflict: 'user_id,activity_date');
+
+    } catch (e) {
+      debugPrint('Error saving steps to database: $e');
+    }
+  }
+
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
@@ -221,7 +310,7 @@ class _HomePageState extends State<HomePage> {
     // Refresh when switching back to Home to catch any goal updates
     if (index == 0) {
       _refreshData();
-      _updateSteps(); // ✅ Also refresh steps
+      _updateSteps();
     }
   }
 
@@ -240,65 +329,45 @@ class _HomePageState extends State<HomePage> {
         _carbsConsumed = data.carbs;
         _carbsGoal = data.carbsGoal;
         _currentStreak = data.streak;
+        _currentSteps = data.stepsCount;
+        _stepsGoal = data.stepsGoal;
       });
     }
   }
 
-  void _updateWater(int newAmount) {
-    setState(() => _waterIntake = newAmount);
-    _refreshData(); // Refresh to sync goals/streak if needed
-  }
-
-  void _updateNutrition(double cals, double prot, double carbs, double fat) {
-    setState(() {
-      _caloriesConsumed = cals.toInt();
-      _proteinConsumed = prot.toInt();
-      _carbsConsumed = carbs.toInt();
-      _fatConsumed = fat.toInt();
-    });
-    _refreshData(); // Refresh to sync goals/streak if needed
-  }
-
-  // ✅ Show dialog to edit step goal
-  void _showEditStepGoalDialog() {
+  void _showEditStepsGoalDialog() {
     final controller = TextEditingController(text: _stepsGoal.toString());
-    
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         backgroundColor: kCardSurface,
-        title: const Text('Edit Step Goal', style: TextStyle(color: kTextWhite)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text("Edit Steps Goal", style: TextStyle(color: kTextWhite)),
         content: TextField(
           controller: controller,
           keyboardType: TextInputType.number,
           style: const TextStyle(color: kTextWhite),
           decoration: InputDecoration(
-            hintText: 'Enter step goal',
+            hintText: "Enter steps goal",
             hintStyle: TextStyle(color: kTextGrey.withOpacity(0.5)),
-            enabledBorder: OutlineInputBorder(
-              borderSide: BorderSide(color: kGlassBorder),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderSide: const BorderSide(color: kAccentCyan),
-              borderRadius: BorderRadius.circular(12),
-            ),
+            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: kGlassBorder)),
+            focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: kAccentCyan)),
           ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: kTextGrey)),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancel", style: TextStyle(color: kTextGrey)),
           ),
           TextButton(
-            onPressed: () {
-              final newGoal = int.tryParse(controller.text);
-              if (newGoal != null && newGoal > 0) {
-                _saveStepGoal(newGoal);
-                Navigator.pop(context);
+            onPressed: () async {
+              final val = int.tryParse(controller.text);
+              if (val != null && val > 0) {
+                await _saveStepGoal(val);
               }
+              if (ctx.mounted) Navigator.pop(ctx);
             },
-            child: const Text('Save', style: TextStyle(color: kAccentCyan)),
+            child: const Text("Save", style: TextStyle(color: kAccentCyan)),
           ),
         ],
       ),
@@ -307,261 +376,182 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final List<Widget> pages = [
-      HomeDashboard(
-        onNavigate: _onItemTapped,
-        waterIntake: _waterIntake,
-        waterGoal: _waterGoal,
-        calories: _caloriesConsumed,
-        caloriesGoal: _caloriesGoal,
-        protein: _proteinConsumed,
-        proteinGoal: _proteinGoal,
-        carbs: _carbsConsumed,
-        carbsGoal: _carbsGoal,
-        fat: _fatConsumed,
-        fatGoal: _fatGoal,
-        streak: _currentStreak,
-        // ✅ Pass step data
-        steps: _currentSteps,
-        stepsGoal: _stepsGoal,
-        onEditStepGoal: _showEditStepGoalDialog,
-      ),
-      NutritionPage(onDataChanged: _updateNutrition),
-      // ✅ FIX: Pass the refresh callback to update streak instantly
-      PersonalizedExerciseScreen(onWorkoutCompleted: _refreshData),
-      WaterTrackerPage(onWaterChanged: _updateWater),
-      const ProfilePage(),
-    ];
-
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [kDarkSlate, kDarkTeal], 
-        ),
-      ),
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        body: IndexedStack(
-          index: _selectedIndex,
-          children: pages,
-        ),
-        bottomNavigationBar: SafeArea(
-          child: Container(
-            height: 75,
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              color: kCardSurface.withOpacity(0.9),
-              borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: kGlassBorder, width: 1.5),
-              boxShadow: [
-                BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4)),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(28),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-                child: BottomNavigationBar(
-                  backgroundColor: Colors.transparent,
-                  elevation: 0,
-                  type: BottomNavigationBarType.fixed,
-                  currentIndex: _selectedIndex,
-                  onTap: _onItemTapped,
-                  selectedItemColor: kAccentCyan,
-                  unselectedItemColor: kTextGrey.withOpacity(0.6),
-                  selectedFontSize: 12,
-                  unselectedFontSize: 11,
-                  showSelectedLabels: true,
-                  showUnselectedLabels: false,
-                  items: const [
-                    BottomNavigationBarItem(icon: Icon(Icons.home_rounded, size: 26), label: 'Home'),
-                    BottomNavigationBarItem(icon: Icon(Icons.restaurant_menu_rounded, size: 26), label: 'Nutrition'),
-                    BottomNavigationBarItem(icon: Icon(Icons.fitness_center_rounded, size: 26), label: 'Exercise'),
-                    BottomNavigationBarItem(icon: Icon(Icons.water_drop_rounded, size: 26), label: 'Water'),
-                    BottomNavigationBarItem(icon: Icon(Icons.person_rounded, size: 26), label: 'Profile'),
-                  ],
+    // Update home page in the list (it needs to rebuild with state changes)
+    _pages[0] = _buildHomePage();
+    
+    return Scaffold(
+      extendBody: true,
+      extendBodyBehindAppBar: true,
+      appBar: _selectedIndex == 0
+          ? AppBar(
+              title: const Text("Dashboard", style: TextStyle(color: kTextWhite, fontWeight: FontWeight.w700, fontSize: 22)),
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              flexibleSpace: ClipRRect(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                  child: Container(color: Colors.transparent),
                 ),
               ),
-            ),
+            )
+          : null,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [kDarkTeal, kDarkSlate],
+          ),
+        ),
+        child: IndexedStack(
+          index: _selectedIndex,
+          children: _pages,
+        ),
+      ),
+      bottomNavigationBar: _buildGlossyBottomBar(),
+    );
+  }
+
+  Widget _buildGlossyBottomBar() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: kCardSurface.withOpacity(0.7),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: kGlassBorder, width: 1),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 20, offset: const Offset(0, 10)),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(30),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildNavItem(Icons.home_rounded, 0),
+              _buildNavItem(Icons.restaurant_menu_rounded, 1),
+              _buildNavItem(Icons.water_drop_rounded, 2),
+              _buildNavItem(Icons.fitness_center_rounded, 3),
+              _buildNavItem(Icons.person_rounded, 4),
+            ],
           ),
         ),
       ),
     );
   }
-}
 
-// ==========================================
-// 2. HOME DASHBOARD (UI ONLY)
-// ==========================================
-class HomeDashboard extends StatelessWidget {
-  final Function(int) onNavigate;
-  final int waterIntake;
-  final int waterGoal;
-  final int calories;
-  final int caloriesGoal;
-  final int protein;
-  final int proteinGoal;
-  final int carbs;
-  final int carbsGoal;
-  final int fat;
-  final int fatGoal;
-  final int streak;
-  // ✅ Step counter props
-  final int steps;
-  final int stepsGoal;
-  final VoidCallback onEditStepGoal;
+  Widget _buildNavItem(IconData icon, int index) {
+    final isSelected = _selectedIndex == index;
+    return GestureDetector(
+      onTap: () => _onItemTapped(index),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        decoration: isSelected
+            ? BoxDecoration(
+                gradient: const LinearGradient(colors: [kAccentCyan, kAccentBlue]),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [BoxShadow(color: kAccentCyan.withOpacity(0.4), blurRadius: 12, offset: const Offset(0, 4))],
+              )
+            : null,
+        child: Icon(icon, color: isSelected ? kTextWhite : kTextGrey, size: 24),
+      ),
+    );
+  }
 
-  const HomeDashboard({
-    super.key,
-    required this.onNavigate,
-    required this.waterIntake,
-    required this.waterGoal,
-    required this.calories,
-    required this.caloriesGoal,
-    required this.protein,
-    required this.proteinGoal,
-    required this.carbs,
-    required this.carbsGoal,
-    required this.fat,
-    required this.fatGoal,
-    required this.streak,
-    required this.steps,
-    required this.stepsGoal,
-    required this.onEditStepGoal,
-  });
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildHomePage() {
     return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 8),
-            _buildGreeting(),
-            const SizedBox(height: 12),
-            _buildStreakBanner(),
-            const SizedBox(height: 24),
-            GlossyNutritionCard(
-              calories: calories,
-              caloriesGoal: caloriesGoal,
-              protein: protein,
-              proteinGoal: proteinGoal,
-              carbs: carbs,
-              carbsGoal: carbsGoal,
-              fat: fat,
-              fatGoal: fatGoal,
-              onTap: () => onNavigate(1),
-            ),
-            const SizedBox(height: 16),
-            GlossyWaterCard(
-              consumed: waterIntake,
-              goal: waterGoal,
-              onTap: () => onNavigate(3),
-            ),
-            const SizedBox(height: 16),
-            // ✅ Updated step card with real data
-            GlossyStepsCard(
-              steps: steps,
-              goal: stepsGoal,
-              onEdit: onEditStepGoal,
-            ),
-            const SizedBox(height: 20),
-          ],
+      child: RefreshIndicator(
+        onRefresh: () async {
+          await _refreshData();
+          _updateSteps();
+        },
+        backgroundColor: kCardSurface,
+        color: kAccentCyan,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildStreakCard(),
+              const SizedBox(height: 20),
+              GlossyWaterCard(
+                consumed: _waterIntake,
+                goal: _waterGoal,
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => WaterTrackerPage())),
+              ),
+              const SizedBox(height: 16),
+              GlossyStepsCard(
+                steps: _currentSteps,
+                goal: _stepsGoal,
+                onEdit: _showEditStepsGoalDialog,
+              ),
+              const SizedBox(height: 24),
+              _buildNutritionCard(
+                protein: _proteinConsumed,
+                proteinGoal: _proteinGoal,
+                carbs: _carbsConsumed,
+                carbsGoal: _carbsGoal,
+                fat: _fatConsumed,
+                fatGoal: _fatGoal,
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildGreeting() {
-    final hour = DateTime.now().hour;
-    String greeting = hour < 12
-        ? "Good Morning"
-        : hour < 17
-            ? "Good Afternoon"
-            : "Good Evening";
-    return Text(
-      greeting,
-      style: const TextStyle(
-        fontSize: 28,
-        fontWeight: FontWeight.bold,
-        color: kTextWhite,
-        letterSpacing: 0.5,
-      ),
-    );
-  }
-
-  Widget _buildStreakBanner() {
+  Widget _buildStreakCard() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [kAccentCyan.withOpacity(0.2), kAccentBlue.withOpacity(0.2)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: kAccentCyan.withOpacity(0.3)),
+        gradient: const LinearGradient(colors: [Color(0xFFFF6B6B), Color(0xFFFFD93D)]),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [BoxShadow(color: const Color(0xFFFF6B6B).withOpacity(0.3), blurRadius: 16, offset: const Offset(0, 8))],
       ),
       child: Row(
         children: [
-          const Icon(Icons.local_fire_department_rounded, color: Colors.orange, size: 32),
-          const SizedBox(width: 12),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(color: Colors.white.withOpacity(0.25), shape: BoxShape.circle),
+            child: const Icon(Icons.local_fire_department_rounded, color: Colors.white, size: 30),
+          ),
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text("Current Streak", style: TextStyle(color: kTextGrey, fontSize: 12, fontWeight: FontWeight.w500)),
+                const Text("Current Streak", style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500)),
                 const SizedBox(height: 2),
-                Text(
-                  "$streak ${streak == 1 ? 'day' : 'days'}",
-                  style: const TextStyle(color: kTextWhite, fontSize: 18, fontWeight: FontWeight.bold),
-                ),
+                Text("$_currentStreak Days", style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
               ],
             ),
           ),
+          const Icon(Icons.chevron_right_rounded, color: Colors.white70, size: 28),
         ],
       ),
     );
   }
-}
 
-// ... (Rest of the file remains exactly the same as your original)
-// Including GlossyNutritionCard, GlossyWaterCard, GlossyStepsCard classes
-
-class GlossyNutritionCard extends StatelessWidget {
-  final int calories;
-  final int caloriesGoal;
-  final int protein;
-  final int proteinGoal;
-  final int carbs;
-  final int carbsGoal;
-  final int fat;
-  final int fatGoal;
-  final VoidCallback onTap;
-
-  const GlossyNutritionCard({
-    super.key,
-    required this.calories,
-    required this.caloriesGoal,
-    required this.protein,
-    required this.proteinGoal,
-    required this.carbs,
-    required this.carbsGoal,
-    required this.fat,
-    required this.fatGoal,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildNutritionCard({
+    required int protein,
+    required int proteinGoal,
+    required int carbs,
+    required int carbsGoal,
+    required int fat,
+    required int fatGoal,
+  }) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => NutritionPage())),
       child: Container(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
           color: kCardSurface.withOpacity(0.6),
           borderRadius: BorderRadius.circular(24),
@@ -573,81 +563,35 @@ class GlossyNutritionCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.green.withOpacity(0.2),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.greenAccent.withOpacity(0.3)),
-                      ),
-                      child: const Icon(Icons.local_dining_rounded, color: Colors.greenAccent, size: 20),
-                    ),
-                    const SizedBox(width: 12),
-                    const Text(
-                      "Nutrition",
-                      style: TextStyle(color: kTextWhite, fontSize: 18, fontWeight: FontWeight.w600),
-                    ),
-                  ],
+                const Text("Nutrition", style: TextStyle(color: kTextWhite, fontSize: 18, fontWeight: FontWeight.w700)),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(color: kAccentCyan.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
+                  child: Text("${_caloriesConsumed}/${_caloriesGoal} kcal", style: const TextStyle(color: kAccentCyan, fontSize: 12, fontWeight: FontWeight.bold)),
                 ),
-                const Icon(Icons.arrow_forward_ios_rounded, color: kTextGrey, size: 16),
               ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.green.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.greenAccent.withOpacity(0.2)),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              height: 8,
+              decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(10)),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  double progress = (_caloriesGoal > 0) ? (_caloriesConsumed / _caloriesGoal).clamp(0.0, 1.0) : 0.0;
+                  return Stack(
                     children: [
-                      const Text(
-                        "Calories",
-                        style: TextStyle(color: kTextGrey, fontSize: 14, fontWeight: FontWeight.w500),
-                      ),
-                      RichText(
-                        text: TextSpan(
-                          children: [
-                            TextSpan(
-                              text: "$calories",
-                              style: const TextStyle(color: kTextWhite, fontSize: 20, fontWeight: FontWeight.bold),
-                            ),
-                            TextSpan(
-                              text: " / $caloriesGoal kcal",
-                              style: TextStyle(color: kTextGrey.withOpacity(0.7), fontSize: 14),
-                            ),
-                          ],
+                      FractionallySizedBox(
+                        widthFactor: progress,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(colors: [Colors.green, Colors.greenAccent]),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                         ),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: FractionallySizedBox(
-                      alignment: Alignment.centerLeft,
-                      widthFactor: (caloriesGoal > 0 ? calories / caloriesGoal : 0.0).clamp(0.0, 1.0),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [Colors.green, Colors.greenAccent],
-                          ),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+                  );
+                },
               ),
             ),
             const SizedBox(height: 24),
