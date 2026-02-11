@@ -35,20 +35,20 @@ class NotificationService {
     if (_isInitialized) return;
 
     try {
-      // Timezone DB
+      // ---- Timezone init ----
       tzdata.initializeTimeZones();
-
-      // Try to set local timezone, fallback to UTC if it fails
       try {
-        // Default to Nepal as requested by the original design
         tz.setLocalLocation(tz.getLocation('Asia/Kathmandu'));
         debugPrint('✅ tz.local set to: Asia/Kathmandu');
       } catch (e) {
-        debugPrint('⚠️ Could not set local timezone to Asia/Kathmandu: $e. Using UTC.');
+        debugPrint('⚠️ Could not set tz to Asia/Kathmandu: $e. Using UTC.');
         tz.setLocalLocation(tz.UTC);
       }
 
-      const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+      // ---- Init settings ----
+      const androidSettings =
+          AndroidInitializationSettings('@mipmap/ic_launcher');
+
       const iosSettings = DarwinInitializationSettings(
         requestAlertPermission: false,
         requestBadgePermission: false,
@@ -68,6 +68,26 @@ class NotificationService {
         onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
       );
 
+      // ---- IMPORTANT for Android 8+ : create channel explicitly ----
+      if (Platform.isAndroid) {
+        final androidPlugin = _notifications.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+
+        await androidPlugin?.createNotificationChannel(
+          const AndroidNotificationChannel(
+            'water_reminder_channel',
+            'Water Reminders',
+            description: 'Notifications for water intake reminders',
+            importance: Importance.max,
+            playSound: true,
+          ),
+        );
+
+        // ---- IMPORTANT for Android 13+ : runtime permission via plugin ----
+        // (permission_handler sometimes returns granted but still blocks)
+        await androidPlugin?.requestNotificationsPermission();
+      }
+
       _isInitialized = true;
       debugPrint('✅ Notifications initialized');
 
@@ -79,15 +99,16 @@ class NotificationService {
 
   Future<void> _requestPermissions() async {
     try {
-      // Request notification permission for Android 13+
-      final status = await Permission.notification.request();
-      debugPrint('🔔 Notification permission: $status');
+      // Android 13+ notification permission (still request with permission_handler too)
+      final notifStatus = await Permission.notification.request();
+      debugPrint('🔔 Notification permission: $notifStatus');
 
       if (Platform.isAndroid) {
-        // Request exact alarm permission for Android 13+
+        // Android 12+ exact alarm permission (needed for exactAllowWhileIdle)
+        // NOTE: This will open system prompt only on supported Android versions.
         if (await Permission.scheduleExactAlarm.isDenied) {
           final alarmStatus = await Permission.scheduleExactAlarm.request();
-          debugPrint('🔔 Exact alarm permission: $alarmStatus');
+          debugPrint('⏰ Exact alarm permission: $alarmStatus');
         }
       }
 
@@ -154,6 +175,7 @@ class NotificationService {
     final scheduledDate = _nextInstanceOfTime(hour, minute);
 
     try {
+      // Android 12/13+ best option (exact while idle)
       await _notifications.zonedSchedule(
         baseId,
         title,
@@ -163,7 +185,7 @@ class NotificationService {
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: DateTimeComponents.time, // ✅ daily repeat
+        matchDateTimeComponents: DateTimeComponents.time, // daily repeat
       );
 
       debugPrint(
@@ -171,8 +193,9 @@ class NotificationService {
         '$scheduledDate (tz.local=${tz.local.name})',
       );
     } catch (e) {
-      debugPrint('❌ Fallback to inexact schedule due to error: $e');
-      // Fallback to inexact scheduling if exact fails (common on Android 12+ without permission)
+      debugPrint('❌ Exact schedule failed, fallback to inexact: $e');
+
+      // Fallback if exact alarms are not allowed by OEM/system settings
       await _notifications.zonedSchedule(
         baseId,
         title,
