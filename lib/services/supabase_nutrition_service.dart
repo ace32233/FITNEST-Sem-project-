@@ -108,20 +108,14 @@ class SupabaseNutritionService {
   }) async {
     try {
       if (_currentUserId == null) {
-        debugPrint('❌ Error: User not authenticated');
+        debugPrint('No user logged in - cannot log meal');
         return false;
       }
 
       final dateStr = _formatDate(activityDate);
+      debugPrint('Logging meal for date: $dateStr');
 
-      debugPrint('📝 Attempting to log meal:');
-      debugPrint('   User ID: $_currentUserId');
-      debugPrint('   Date: $dateStr');
-      debugPrint('   Food: $foodName');
-      debugPrint('   Calories: $calories');
-
-      // Insert meal log with error details
-      final response = await _client.from('meal_logs').insert({
+      await _client.from('meal_logs').insert({
         'user_id': _currentUserId,
         'activity_date': dateStr,
         'food_name': foodName,
@@ -130,25 +124,15 @@ class SupabaseNutritionService {
         'protein_g': protein,
         'carbs_g': carbs,
         'fat_g': fat,
-      }).select();
-
-      debugPrint('✅ Meal logged successfully: $response');
+      });
 
       // Update daily_activities table with the new totals
       await _updateDailyActivities(activityDate);
 
-      debugPrint('✅ Daily activities updated');
+      debugPrint('Meal logged successfully');
       return true;
-    } on PostgrestException catch (e) {
-      debugPrint('❌ PostgreSQL Error logging meal:');
-      debugPrint('   Code: ${e.code}');
-      debugPrint('   Message: ${e.message}');
-      debugPrint('   Details: ${e.details}');
-      debugPrint('   Hint: ${e.hint}');
-      return false;
     } catch (e) {
-      debugPrint('❌ Unknown error logging meal: $e');
-      debugPrint('   Type: ${e.runtimeType}');
+      debugPrint('Error logging meal: $e');
       return false;
     }
   }

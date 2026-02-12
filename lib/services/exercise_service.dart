@@ -20,8 +20,10 @@ class ExerciseService {
 
   static List<String> get _keys {
     final candidates = <String>[
+      dotenv.env['EXERCISE_API_KEY'] ?? '',
       dotenv.env['EXERCISE_API_KEY_1'] ?? '',
       dotenv.env['EXERCISE_API_KEY_2'] ?? '',
+      dotenv.env['EXERCISE_API_KEY_3'] ?? '',
     ];
     return candidates.map((k) => k.trim()).where((k) => k.isNotEmpty).toList();
   }
@@ -49,7 +51,7 @@ class ExerciseService {
     if (keys.isEmpty) {
       throw Exception(
         'Exercise API credentials not found. '
-        'Set EXERCISE_API_KEY_1 and/or EXERCISE_API_KEY_2 in .env '
+        'Set EXERCISE_API_KEY (or EXERCISE_API_KEY_1/2/3) in .env '
         'and ensure dotenv is loaded before calling ExerciseService.',
       );
     }
