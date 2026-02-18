@@ -82,7 +82,4 @@ Fitnest utilizes a **Glossy/Glassmorphism** design language, featuring:
 
 ---
 
-## 🚀 Upcoming Features
-- Social fitness challenges with friends.
-- Advanced heart rate monitoring integration.
-- Wearable device synchronization (Apple Health & Google Fit).
+
